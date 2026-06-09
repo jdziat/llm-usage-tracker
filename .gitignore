@@ -1,0 +1,19 @@
+# Build artifacts
+/llmut
+/llmut.exe
+/dist/
+
+# Generated reports (README examples write these to the repo root)
+/usage.html
+/usage.csv
+/usage.json
+
+# Tool caches and agent-dispatch artifacts
+/.pytest_cache/
+/.codex-dispatch/
+
+# Editor / OS cruft
+.idea/
+.vscode/
+*.swp
+.DS_Store
