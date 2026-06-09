@@ -98,10 +98,13 @@ func basenameSession(path string) string {
 	}
 	name = strings.TrimSuffix(name, ".jsonl")
 	name = strings.TrimSuffix(name, ".json")
+	// Codex rollout files are named rollout-YYYY-MM-DDTHH-MM-SS-<uuid>.jsonl.
+	// Splitting on "-" yields six prefix/date/time parts before the UUID, which
+	// itself contains hyphens, so rejoin everything from index 6 onward.
 	if strings.HasPrefix(name, "rollout-") {
 		parts := strings.Split(name, "-")
 		if len(parts) >= 7 {
-			return strings.Join(parts[4:], "-")
+			return strings.Join(parts[6:], "-")
 		}
 	}
 	return name
