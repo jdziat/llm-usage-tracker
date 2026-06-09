@@ -1,13 +1,16 @@
 package usage
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -28,6 +31,14 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		cfg.View = "blocks"
 		cfg.Active = true
 		cfg.Compact = true
+	}
+	if cfg.Live {
+		if err := validateLiveConfig(cfg); err != nil {
+			return err
+		}
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return runLive(cfg, stdout, stderr, ctx.Done())
 	}
 	if cfg.Progress && writerIsTerminal(stderr) {
 		cfg.progress = newProgressIndicator(stderr)
@@ -59,20 +70,31 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	case "html":
 		return writeHTML(out, title(cfg), cfg, rows, warnings)
 	}
+	renderReport(out, cfg, rows)
+	return nil
+}
+
+func validateLiveConfig(cfg Config) error {
+	if cfg.OutputPath != "" || (cfg.Format != "table" && cfg.Format != "pretty") {
+		return fmt.Errorf("--live requires table or pretty output to a terminal")
+	}
+	return nil
+}
+
+func renderReport(out io.Writer, cfg Config, rows []Row) {
 	if cfg.View == "blocks" && cfg.Compact {
 		writeStatusline(out, rows, cfg)
-		return nil
+		return
 	}
 	if len(rows) == 0 {
 		fmt.Fprintln(out, "No usage data found.")
-		return nil
+		return
 	}
 	if cfg.Format == "pretty" {
 		writePrettyTable(out, title(cfg), rows, cfg)
-		return nil
+		return
 	}
 	writeTable(out, title(cfg), rows, cfg)
-	return nil
 }
 
 func parseArgs(args []string) (Config, error) {
@@ -119,9 +141,9 @@ func parseArgs(args []string) (Config, error) {
 		cfg.Progress = false
 		return nil
 	})
-	fs.BoolVar(&ignoredCache, "cache", false, "accepted for statusline compatibility")
-	fs.Bool("offline", false, "use builtin/offline pricing")
-	fs.Bool("O", false, "use builtin/offline pricing")
+	fs.BoolVar(&ignoredCache, "cache", false, "no-op, accepted for ccusage statusline compatibility")
+	fs.Bool("offline", false, "no-op, accepted for ccusage compatibility (pricing is always offline)")
+	fs.Bool("O", false, "no-op, accepted for ccusage compatibility (pricing is always offline)")
 	fs.StringVar(&since, "since", "", "start date")
 	fs.StringVar(&until, "until", "", "end date")
 	fs.StringVar(&timezone, "timezone", "", "timezone")
@@ -143,9 +165,9 @@ func parseArgs(args []string) (Config, error) {
 	fs.StringVar(&sessionLength, "session-length", "5", "block length hours")
 	fs.StringVar(&refresh, "refresh-interval", "5", "refresh interval seconds")
 	fs.StringVar(&cfg.Speed, "speed", "auto", "codex pricing speed: auto, standard, fast")
-	fs.StringVar(&ignoredLocale, "locale", "", "accepted for ccusage compatibility")
-	fs.Int("debug-samples", 0, "debug sample count")
-	fs.String("config", "", "config file placeholder")
+	fs.StringVar(&ignoredLocale, "locale", "", "no-op, accepted for ccusage compatibility")
+	fs.Int("debug-samples", 0, "no-op, accepted for ccusage compatibility")
+	fs.String("config", "", "no-op, accepted for ccusage compatibility")
 	// Allow flags and the positional [source] [view] arguments to appear in any
 	// order. Go's flag package stops parsing at the first non-flag token, so
 	// loop, collecting the leftover positionals between flag groups. This makes
@@ -293,6 +315,8 @@ Examples:
   llmut daily --format csv --output usage.csv
   llmut daily --no-progress
   llmut claude blocks --active
+  llmut claude blocks --active --live
+  llmut daily --live --refresh-interval 2
   llmut pi session --pi-path ~/.pi/agent/sessions`)
 }
 
@@ -324,5 +348,9 @@ func title(cfg Config) string {
 	if len(cfg.Sources) == 1 {
 		scope = sourceLabel(cfg.Sources[0])
 	}
-	return fmt.Sprintf("Coding Agent Usage Report - %s - %s", strings.Title(cfg.View), scope)
+	view := cfg.View
+	if view != "" {
+		view = strings.ToUpper(view[:1]) + view[1:]
+	}
+	return fmt.Sprintf("Coding Agent Usage Report - %s - %s", view, scope)
 }
