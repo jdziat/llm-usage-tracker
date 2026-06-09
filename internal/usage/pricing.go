@@ -6,7 +6,13 @@ type price struct {
 	input, output, cacheWrite, cacheRead float64
 }
 
+// builtinPrices holds USD prices per million tokens for each model family.
+// Last verified against provider pricing pages on 2026-06-09. When adding a
+// model, also add a normalizeModel case if dated or suffixed variants of the
+// ID exist in the wild.
 var builtinPrices = map[string]price{
+	"claude-fable-5":       {input: 10, output: 50, cacheWrite: 12.5, cacheRead: 1},
+	"claude-mythos-5":      {input: 10, output: 50, cacheWrite: 12.5, cacheRead: 1},
 	"claude-opus-4-8":      {input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5},
 	"claude-opus-4-7":      {input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5},
 	"claude-opus-4-6":      {input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5},
@@ -97,6 +103,10 @@ func normalizeModel(model string) string {
 	switch {
 	case strings.Contains(m, "gemini-3-pro"):
 		return "gemini-3-pro-preview"
+	case strings.Contains(m, "fable-5"):
+		return "claude-fable-5"
+	case strings.Contains(m, "mythos-5"):
+		return "claude-mythos-5"
 	case strings.Contains(m, "opus-4-8"):
 		return "claude-opus-4-8"
 	case strings.Contains(m, "opus-4-7"):

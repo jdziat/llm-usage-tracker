@@ -31,6 +31,21 @@ func TestOpus48DoesNotUseDeprecatedOpus4Pricing(t *testing.T) {
 	}
 }
 
+func TestFable5AndMythos5Pricing(t *testing.T) {
+	tok := Tokens{Input: 1_000_000, Output: 1_000_000, CacheCreation: 1_000_000, CacheRead: 1_000_000}
+	want := 73.5 // $10 input + $50 output + $12.50 cache write + $1 cache read.
+	cases := []string{
+		"claude-fable-5",
+		"claude-fable-5[1m]", // long-context variant must normalize to the base ID.
+		"claude-mythos-5",
+	}
+	for _, model := range cases {
+		if got := calculateCost(model, tok, "standard"); got != want {
+			t.Errorf("%s cost = %.2f, want %.2f", model, got, want)
+		}
+	}
+}
+
 func TestFastModeIsPerModel(t *testing.T) {
 	tok := Tokens{Input: 1_000_000, Output: 1_000_000, CacheCreation: 1_000_000, CacheRead: 1_000_000}
 	cases := []struct {
