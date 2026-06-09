@@ -31,7 +31,7 @@ func TestAggregateRanksModelsByCostThenTokens(t *testing.T) {
 	}
 }
 
-func TestAggregateSummaryReturnsTopProjectsByCost(t *testing.T) {
+func TestAggregateSummaryReturnsTopModelsByCost(t *testing.T) {
 	when := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
 	events := []Event{
 		{Source: SourceClaude, SessionID: "s1", Project: "/work/cheap", Model: "claude-haiku-4-5-20251001", Time: when, Tokens: Tokens{Input: 100, CostUSD: 1}},
@@ -43,8 +43,24 @@ func TestAggregateSummaryReturnsTopProjectsByCost(t *testing.T) {
 	if len(rows) != 2 {
 		t.Fatalf("expected 2 summary rows, got %d", len(rows))
 	}
-	if rows[0].Key != "expensive" || rows[1].Key != "mid" {
+	if rows[0].Key != "claude-opus-4-7" || rows[1].Key != "gpt-5.5" {
 		t.Fatalf("unexpected summary order: %+v", rows)
+	}
+}
+
+func TestAggregateSummaryMergesProjectsPerModel(t *testing.T) {
+	when := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
+	events := []Event{
+		{Source: SourceClaude, SessionID: "s1", Project: "/work/a", Model: "claude-opus-4-8", Time: when, Tokens: Tokens{Input: 100, CostUSD: 2}},
+		{Source: SourceClaude, SessionID: "s2", Project: "/work/b", Model: "claude-opus-4-8", Time: when.Add(time.Hour), Tokens: Tokens{Input: 50, CostUSD: 1}},
+	}
+
+	rows := aggregate(events, Config{View: "summary", Sources: []string{SourceClaude}, Location: time.UTC, Order: "desc"})
+	if len(rows) != 1 {
+		t.Fatalf("expected one row per model, got %d", len(rows))
+	}
+	if rows[0].Key != "claude-opus-4-8" || rows[0].Input != 150 || rows[0].CostUSD != 3 {
+		t.Fatalf("unexpected merged row: %+v", rows[0])
 	}
 }
 
@@ -55,8 +71,8 @@ func TestAggregateSummaryDefaultsToTopTen(t *testing.T) {
 		events = append(events, Event{
 			Source:    SourceClaude,
 			SessionID: "s",
-			Project:   fmt.Sprintf("/work/project-%02d", i),
-			Model:     "claude-haiku-4-5-20251001",
+			Project:   "/work/repo",
+			Model:     fmt.Sprintf("model-%02d", i),
 			Time:      when,
 			Tokens:    Tokens{Input: 100, CostUSD: float64(i)},
 		})
@@ -66,7 +82,7 @@ func TestAggregateSummaryDefaultsToTopTen(t *testing.T) {
 	if len(rows) != 10 {
 		t.Fatalf("expected default top 10, got %d", len(rows))
 	}
-	if rows[0].Key != "project-11" {
-		t.Fatalf("first row = %q, want project-11", rows[0].Key)
+	if rows[0].Key != "model-11" {
+		t.Fatalf("first row = %q, want model-11", rows[0].Key)
 	}
 }

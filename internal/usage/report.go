@@ -303,7 +303,7 @@ func keyHeader(cfg Config) string {
 	case "session":
 		return "Session"
 	case "summary":
-		return "Project"
+		return "Model"
 	case "blocks":
 		return "Block Start"
 	default:

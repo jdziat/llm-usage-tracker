@@ -34,14 +34,14 @@ func aggregate(events []Event, cfg Config) []Row {
 func aggregateSummary(events []Event, cfg Config) []Row {
 	rows := map[string]*Row{}
 	for _, ev := range events {
-		project := displayProject(ev)
-		key := project
+		model := firstNonEmpty(ev.Model, "unknown")
+		key := model
 		if len(cfg.Sources) != 1 {
-			key = sourceLabel(ev.Source) + ":" + project
+			key = sourceLabel(ev.Source) + ":" + model
 		}
 		row := rows[key]
 		if row == nil {
-			row = &Row{Key: project, Source: sourceForRow(cfg, ev.Source), Project: ev.Project, Start: ev.Time, LastActivity: ev.Time}
+			row = &Row{Key: model, Source: sourceForRow(cfg, ev.Source), Start: ev.Time, LastActivity: ev.Time}
 			rows[key] = row
 		}
 		addEvent(row, ev)
@@ -278,17 +278,6 @@ func displaySession(ev Event) string {
 		return compactProject(ev.Project)
 	}
 	return ev.SessionID
-}
-
-func displayProject(ev Event) string {
-	project := compactProject(ev.Project)
-	if project != "" {
-		return project
-	}
-	if ev.SessionID != "" {
-		return ev.SessionID
-	}
-	return "(unknown)"
 }
 
 func compactProject(project string) string {
