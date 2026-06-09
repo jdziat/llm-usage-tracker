@@ -1,65 +1,132 @@
 # llmut
 
-`llmut` is a Go CLI for local coding-agent usage tracking, modeled after the current `ccusage` command surface.
+Track token usage and estimated cost across your local coding-agent logs — offline, from one CLI.
 
-It reads local logs for Claude Code, Codex, OpenCode, Amp, and pi-agent, aggregates token and estimated cost data, and emits terminal tables or JSON.
-It can also generate CSV and self-contained HTML reports.
+[![CI](https://github.com/jdziat/llm-usage-tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/jdziat/llm-usage-tracker/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/jdziat/llm-usage-tracker.svg)](https://pkg.go.dev/github.com/jdziat/llm-usage-tracker)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-## Build
+`llmut` reads the log files that coding agents already write to your machine, aggregates token counts, and estimates USD cost from a built-in pricing table. It supports five agents:
+
+- **Claude Code** (`claude`)
+- **OpenAI Codex CLI** (`codex`)
+- **OpenCode** (`opencode`)
+- **Amp** (`amp`)
+- **pi-agent** (`pi`)
+
+Everything happens locally: zero network calls, zero telemetry, zero runtime dependencies (pure Go standard library). Pricing is an offline table compiled into the binary — `llmut` never phones home.
+
+The command surface is modeled after [ccusage](https://github.com/ryoppippi/ccusage), so existing `ccusage` muscle memory (and statusline hooks) carry over.
+
+## Install
+
+With Go:
 
 ```bash
+go install github.com/jdziat/llm-usage-tracker/cmd/llmut@latest
+```
+
+Prebuilt binaries for Linux and macOS (amd64/arm64) and Windows (amd64) are on the [GitHub Releases](https://github.com/jdziat/llm-usage-tracker/releases) page.
+
+Or build from source:
+
+```bash
+git clone https://github.com/jdziat/llm-usage-tracker
+cd llm-usage-tracker
 go build ./cmd/llmut
 ```
 
-## Examples
+## Quick start
 
 ```bash
-llmut daily --since 2026-05-01 --breakdown
-llmut summary --since 2026-05-01 --top 10
-llmut codex monthly --json --speed fast
-llmut claude session --project my-repo
-llmut daily --format pretty
-llmut daily --format html --output usage.html
-llmut daily --format csv --output usage.csv
-llmut daily --no-progress
-llmut claude blocks --active
-llmut pi daily --pi-path ~/.pi/agent/sessions
+llmut                              # daily usage across all sources
+llmut summary --since 2026-05-01   # top models by cost
+llmut codex monthly --json         # one source, machine-readable
+llmut claude blocks --active       # current Claude 5-hour billing window
 ```
 
-## Supported Views
+Sample `llmut summary` output:
 
-- `daily`, `weekly`, `monthly`: aggregate by local date, ISO week, or month.
-- `session`: aggregate by source session ID.
-- `summary`: top projects over the selected timeframe, sorted by cost and limited to 10 rows by default.
-- `blocks`: Claude-only 5-hour billing-window style aggregation.
-- `statusline`: compact Claude active-block output for status hooks.
+```
+Coding Agent Usage Report - Summary - All Sources
+-------------------------------------------------
+Model                                     Input        Output     Cache Cr.        Cache Rd.            Total         Cost  Models
+------------------------------  ---------------  ------------  ------------  ---------------  ---------------  -----------  ------------------------------
+claude-opus-4-8                       2,841,332       412,907    18,322,118       96,114,209      117,690,566    $187.0997  claude-opus-4-8
+claude-sonnet-4-6                     1,104,219       241,883     4,200,761       22,018,940       27,565,803     $29.2994  claude-sonnet-4-6
+gpt-5.5                               5,210,448       933,026             0       41,002,815       47,146,289     $20.9687  gpt-5.5
+gemini-2.5-flash                        802,114       151,209             0                0          953,323      $0.6187  gemini-2.5-flash
+------------------------------  ---------------  ------------  ------------  ---------------  ---------------  -----------  ------------------------------
+Total                                 9,958,113     1,739,025    22,522,879      159,135,964      193,355,981    $237.9864
+```
 
-## Supported Sources
+The general shape is `llmut [source] [view] [options]` — omit the source to aggregate all of them. Run `llmut help` for the short reference, or see [docs/cli.md](docs/cli.md) for every flag.
 
-- Claude Code: `~/.config/claude/projects`, `~/.claude/projects`, or `CLAUDE_CONFIG_DIR`.
-- Codex: `~/.codex/sessions` or `CODEX_HOME`.
-- OpenCode: `~/.local/share/opencode` or `OPENCODE_DATA_DIR`.
-- Amp: `~/.local/share/amp` or `AMP_DATA_DIR`.
-- pi-agent: `~/.pi/agent/sessions` or `PI_AGENT_DIR`.
+## Views
 
-Source focused commands use the same shape as `ccusage`, for example `llmut codex daily` or `llmut claude monthly`.
+| View | What it shows |
+|---|---|
+| `daily` | Usage per local calendar date (the default) |
+| `weekly` | Usage per week (`--start-of-week monday\|sunday`) |
+| `monthly` | Usage per calendar month |
+| `session` | Usage per agent session ID |
+| `summary` | Top models by cost over the timeframe (default top 10, `--top N`) |
+| `blocks` | Claude-only 5-hour billing-window aggregation (`--active`, `--recent`) |
+| `statusline` | Compact one-line active-block output for status hooks (Claude-only) |
 
-## Report Formats
+## Sources
 
-- `--format table`: default terminal table.
-- `--format pretty`: boxed terminal table.
-- `--format json` or `--json`: structured report for scripts.
-- `--format csv`: spreadsheet-friendly rows.
-- `--format html`: self-contained HTML report.
+| Source | Default log paths | Env override |
+|---|---|---|
+| `claude` | `~/.config/claude/projects`, `~/.claude/projects` | `CLAUDE_CONFIG_DIR` |
+| `codex` | `~/.codex/sessions` | `CODEX_HOME` |
+| `opencode` | `~/.local/share/opencode` | `OPENCODE_DATA_DIR` |
+| `amp` | `~/.local/share/amp` | `AMP_DATA_DIR` |
+| `pi` | `~/.pi/agent/sessions` | `PI_AGENT_DIR` |
 
-Use `--output <path>` or `-o <path>` to write any format to a file.
+Each source also has a `--<source>-path` flag (e.g. `--codex-path`), and single-source commands accept `--path`. Log formats and discovery rules are documented in [docs/sources.md](docs/sources.md).
 
-For `summary`, use `--top N` to change the project count.
+## Formats
 
-## Progress
+- `table` — plain terminal table (default)
+- `pretty` — boxed terminal table
+- `json` — structured report (`--json`/`-j` is shorthand)
+- `csv` — flat rows for spreadsheets
+- `html` — self-contained HTML report
 
-`llmut` shows an interactive spinner on stderr while scanning sources when stderr is a terminal. Progress is suppressed automatically for redirected output and can be disabled explicitly with `--no-progress`.
+Use `--format <name>` to pick one and `--output`/`-o` to write to a file instead of stdout.
 
-## Notes
+### Live mode
 
-Pricing is calculated offline from a built-in table for common Claude, OpenAI, and Gemini coding models. Unknown models are still counted but report `$0.0000` until a price entry is added.
+`--live` re-renders `table`/`pretty` output every `--refresh-interval` seconds (default 5), clearing the terminal between frames and re-reading the logs each cycle, so the report tracks agent activity as it happens. Exit cleanly with Ctrl-C. It works with all views, including `blocks` and `statusline`, but it is an error to combine `--live` with `--format json/csv/html` or `--output`.
+
+```bash
+llmut claude blocks --active --live
+llmut daily --live --refresh-interval 2
+```
+
+## Cost estimation
+
+Costs come from a pricing table built into the binary: for each known model family it stores USD per million tokens for input, output, cache-write, and cache-read tokens. Model IDs found in logs are normalized first — provider prefixes (`anthropic/`, `openai/`, `google/`, ...) are stripped, and dated or suffixed variants (e.g. `claude-fable-5[1m]`) map to their base family — so the same model is priced consistently regardless of which agent logged it. The table was last verified against provider pricing pages on 2026-06-09.
+
+Estimates are exactly that: estimates. They do not account for subscription plans, batch discounts, or provider-side promotions. Unknown models still have their tokens counted, but report `$0.0000` rather than guessing. The full table, normalization rules, and update process live in [docs/pricing.md](docs/pricing.md).
+
+Two flags tune the calculation:
+
+- `--mode auto|calculate|display` — whether to trust cost figures recorded in the logs (`display`), always recompute from the pricing table (`calculate`), or prefer recorded values and fill gaps by computing (`auto`, default).
+- `--speed auto|standard|fast` — selects the pricing speed tier. Fast-mode multipliers currently exist only for Claude fast-mode models (`claude-opus-4-8` 2x, `claude-opus-4-7`/`4-6` 6x); all other models, including GPT/Codex models, are unaffected. `auto` detects the Codex `service_tier` from `~/.codex/config.toml`.
+
+## ccusage compatibility
+
+`llmut` accepts several `ccusage` flags as documented no-ops so it can drop into existing scripts and statusline hooks unchanged: `--cache`, `--offline`/`-O` (pricing is always offline), `--locale`, `--config`, and `--debug-samples`.
+
+## Documentation
+
+- [docs/cli.md](docs/cli.md) — full command and flag reference
+- [docs/sources.md](docs/sources.md) — per-agent log formats and discovery rules
+- [docs/pricing.md](docs/pricing.md) — pricing table and cost model
+- [CONTRIBUTING.md](CONTRIBUTING.md) — development setup, CI, releases
+
+## License
+
+MIT — see [LICENSE](LICENSE). Copyright (c) 2026 Jordan Dziat.
