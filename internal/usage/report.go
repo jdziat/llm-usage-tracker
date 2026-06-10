@@ -19,6 +19,7 @@ type RenderOptions struct {
 	Compact    bool
 	TokenLimit int64
 	Debug      bool
+	Fields     []string
 
 	progress        bool
 	refreshInterval time.Duration
@@ -62,80 +63,78 @@ func renderReport(out io.Writer, res core.Result, q core.Query, opts RenderOptio
 func writeTable(w io.Writer, title string, res core.Result, q core.Query, opts RenderOptions) {
 	fmt.Fprintln(w, title)
 	fmt.Fprintln(w, strings.Repeat("-", len(title)))
-	headers := []string{keyHeader(q), "Input", "Output", "Cache Cr.", "Cache Rd.", "Total", "Cost", "Models"}
-	widths := reportWidths(q, opts)
-	printRow(w, widths, headers)
+	cols := selectedColumns(q, opts)
+	headers := columnHeaders(cols, q)
+	widths := reportWidths(q, opts, cols)
+	printColumnRow(w, widths, cols, headers)
 	printSep(w, widths)
 	for _, row := range res.Rows {
-		printRow(w, widths, []string{
-			row.Key,
-			formatInt(row.Input),
-			formatInt(row.Output),
-			formatInt(row.CacheCreation),
-			formatInt(row.CacheRead),
-			formatInt(row.Total()),
-			formatCost(row.CostUSD),
-			truncate(strings.Join(row.ModelsUsed, ","), widths[7]),
-		})
+		printColumnRow(w, widths, cols, rowCells(cols, row, q, false, false, widths))
 		if opts.Breakdown {
 			for _, b := range row.ModelBreakdowns {
-				printRow(w, widths, []string{
-					"  " + truncate(b.Model, widths[0]-2),
-					formatInt(b.Input),
-					formatInt(b.Output),
-					formatInt(b.CacheCreation),
-					formatInt(b.CacheRead),
-					formatInt(b.Total()),
-					formatCost(b.CostUSD),
-					"",
-				})
+				breakdown := row
+				breakdown.Key = b.Model
+				breakdown.ModelsUsed = nil
+				breakdown.Tokens = b.Tokens
+				printColumnRow(w, widths, cols, rowCells(cols, breakdown, q, true, false, widths))
 			}
 		}
 	}
 	printSep(w, widths)
-	printRow(w, widths, []string{"Total", formatInt(res.Totals.Input), formatInt(res.Totals.Output), formatInt(res.Totals.CacheCreation), formatInt(res.Totals.CacheRead), formatInt(res.Totals.Total()), formatCost(res.Totals.CostUSD), ""})
+	printColumnRow(w, widths, cols, totalCells(cols, res.Totals))
 }
 
 func writePrettyTable(w io.Writer, title string, res core.Result, q core.Query, opts RenderOptions) {
 	fmt.Fprintln(w, title)
-	widths := reportWidths(q, opts)
-	headers := []string{keyHeader(q), "Input", "Output", "Cache Cr.", "Cache Rd.", "Total", "Cost", "Models"}
+	cols := selectedColumns(q, opts)
+	widths := reportWidths(q, opts, cols)
+	headers := columnHeaders(cols, q)
 	printBoxBorder(w, widths, "top")
-	printBoxRow(w, widths, headers)
+	printBoxColumnRow(w, widths, cols, headers)
 	printBoxBorder(w, widths, "mid")
 	for _, row := range res.Rows {
-		printBoxRow(w, widths, []string{
-			row.Key,
-			formatInt(row.Input),
-			formatInt(row.Output),
-			formatInt(row.CacheCreation),
-			formatInt(row.CacheRead),
-			formatInt(row.Total()),
-			formatCost(row.CostUSD),
-			truncate(strings.Join(row.ModelsUsed, ","), widths[7]),
-		})
+		printBoxColumnRow(w, widths, cols, rowCells(cols, row, q, false, false, widths))
 		if opts.Breakdown {
 			for _, b := range row.ModelBreakdowns {
-				printBoxRow(w, widths, []string{
-					"  " + truncate(b.Model, widths[0]-2),
-					formatInt(b.Input),
-					formatInt(b.Output),
-					formatInt(b.CacheCreation),
-					formatInt(b.CacheRead),
-					formatInt(b.Total()),
-					formatCost(b.CostUSD),
-					"",
-				})
+				breakdown := row
+				breakdown.Key = b.Model
+				breakdown.ModelsUsed = nil
+				breakdown.Tokens = b.Tokens
+				printBoxColumnRow(w, widths, cols, rowCells(cols, breakdown, q, true, false, widths))
 			}
 		}
 	}
 	printBoxBorder(w, widths, "mid")
-	printBoxRow(w, widths, []string{"Total", formatInt(res.Totals.Input), formatInt(res.Totals.Output), formatInt(res.Totals.CacheCreation), formatInt(res.Totals.CacheRead), formatInt(res.Totals.Total()), formatCost(res.Totals.CostUSD), ""})
+	printBoxColumnRow(w, widths, cols, totalCells(cols, res.Totals))
 	printBoxBorder(w, widths, "bottom")
 }
 
 func writeCSV(w io.Writer, opts RenderOptions, rows []core.Row) error {
 	cw := csv.NewWriter(w)
+	if len(opts.Fields) > 0 {
+		cols := selectedColumns(core.Query{}, opts)
+		if err := cw.Write(csvHeaders(cols)); err != nil {
+			return err
+		}
+		for _, row := range rows {
+			if err := cw.Write(rowCells(cols, row, core.Query{}, false, true, nil)); err != nil {
+				return err
+			}
+			if opts.Breakdown {
+				for _, b := range row.ModelBreakdowns {
+					breakdown := row
+					breakdown.Key = "  " + b.Model
+					breakdown.ModelsUsed = []string{b.Model}
+					breakdown.Tokens = b.Tokens
+					if err := cw.Write(rowCells(cols, breakdown, core.Query{}, false, true, nil)); err != nil {
+						return err
+					}
+				}
+			}
+		}
+		cw.Flush()
+		return cw.Error()
+	}
 	header := []string{"key", "source", "session_id", "project", "start", "last_activity", "input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens", "total_tokens", "reasoning_tokens", "cost_usd", "credits", "models"}
 	if err := cw.Write(header); err != nil {
 		return err
@@ -189,16 +188,17 @@ tr.breakdown td:first-child{padding-left:28px;color:#52606d}
 	htmlMetric(w, "Total Tokens", formatInt(res.Totals.Total()))
 	htmlMetric(w, "Cost", formatCost(res.Totals.CostUSD))
 	fmt.Fprintln(w, `</section>`)
-	fmt.Fprintln(w, `<table><thead><tr><th>`+html.EscapeString(keyHeader(q))+`</th><th>Input</th><th>Output</th><th>Cache Cr.</th><th>Cache Rd.</th><th>Total</th><th>Cost</th><th>Models</th></tr></thead><tbody>`)
+	cols := selectedColumns(q, opts)
+	fmt.Fprintln(w, htmlHeaderRow(cols, q))
 	for _, row := range res.Rows {
-		writeHTMLRow(w, row, "")
+		writeHTMLRow(w, row, "", cols, q)
 		if opts.Breakdown {
 			for _, b := range row.ModelBreakdowns {
 				breakdown := row
 				breakdown.Key = b.Model
 				breakdown.ModelsUsed = nil
 				breakdown.Tokens = b.Tokens
-				writeHTMLRow(w, breakdown, ` class="breakdown"`)
+				writeHTMLRow(w, breakdown, ` class="breakdown"`, cols, q)
 			}
 		}
 	}
@@ -232,15 +232,15 @@ func writeStatusline(w io.Writer, rows []core.Row, q core.Query, opts RenderOpti
 	fmt.Fprintf(w, "Claude %s tokens %s %s left%s\n", formatInt(r.Total()), formatCost(r.CostUSD), remaining.Round(time.Minute), limit)
 }
 
-func printRow(w io.Writer, widths []int, cols []string) {
-	for i, col := range cols {
+func printColumnRow(w io.Writer, widths []int, cols []fieldColumn, cells []string) {
+	for i, cell := range cells {
 		if i > 0 {
 			fmt.Fprint(w, "  ")
 		}
-		if i == 0 || i == len(cols)-1 {
-			fmt.Fprintf(w, "%-*s", widths[i], truncate(col, widths[i]))
+		if cols[i].left {
+			fmt.Fprintf(w, "%-*s", widths[i], truncate(cell, widths[i]))
 		} else {
-			fmt.Fprintf(w, "%*s", widths[i], truncate(col, widths[i]))
+			fmt.Fprintf(w, "%*s", widths[i], truncate(cell, widths[i]))
 		}
 	}
 	fmt.Fprintln(w)
@@ -269,13 +269,13 @@ func printBoxBorder(w io.Writer, widths []int, pos string) {
 	fmt.Fprintln(w, right)
 }
 
-func printBoxRow(w io.Writer, widths []int, cols []string) {
+func printBoxColumnRow(w io.Writer, widths []int, cols []fieldColumn, cells []string) {
 	fmt.Fprint(w, "|")
-	for i, col := range cols {
-		if i == 0 || i == len(cols)-1 {
-			fmt.Fprintf(w, " %-*s |", widths[i], truncate(col, widths[i]))
+	for i, cell := range cells {
+		if cols[i].left {
+			fmt.Fprintf(w, " %-*s |", widths[i], truncate(cell, widths[i]))
 		} else {
-			fmt.Fprintf(w, " %*s |", widths[i], truncate(col, widths[i]))
+			fmt.Fprintf(w, " %*s |", widths[i], truncate(cell, widths[i]))
 		}
 	}
 	fmt.Fprintln(w)
@@ -301,16 +301,16 @@ func csvRow(row core.Row) []string {
 	}
 }
 
-func writeHTMLRow(w io.Writer, row core.Row, class string) {
+func writeHTMLRow(w io.Writer, row core.Row, class string, cols []fieldColumn, q core.Query) {
 	fmt.Fprintf(w, "<tr%s>", class)
-	fmt.Fprintf(w, "<td>%s</td>", html.EscapeString(row.Key))
-	fmt.Fprintf(w, "<td>%s</td>", html.EscapeString(formatInt(row.Input)))
-	fmt.Fprintf(w, "<td>%s</td>", html.EscapeString(formatInt(row.Output)))
-	fmt.Fprintf(w, "<td>%s</td>", html.EscapeString(formatInt(row.CacheCreation)))
-	fmt.Fprintf(w, "<td>%s</td>", html.EscapeString(formatInt(row.CacheRead)))
-	fmt.Fprintf(w, "<td>%s</td>", html.EscapeString(formatInt(row.Total())))
-	fmt.Fprintf(w, "<td>%s</td>", html.EscapeString(formatCost(row.CostUSD)))
-	fmt.Fprintf(w, "<td>%s</td>", html.EscapeString(strings.Join(row.ModelsUsed, ", ")))
+	cells := rowCells(cols, row, q, false, false, nil)
+	for i, col := range cols {
+		cell := cells[i]
+		if col.name == "models" {
+			cell = strings.Join(row.ModelsUsed, ", ")
+		}
+		fmt.Fprintf(w, "<td>%s</td>", html.EscapeString(cell))
+	}
 	fmt.Fprintln(w, "</tr>")
 }
 
@@ -358,8 +358,201 @@ func modelWidth(opts RenderOptions) int {
 	return 30
 }
 
-func reportWidths(q core.Query, opts RenderOptions) []int {
-	return []int{minWidth(q, opts), 15, 12, 12, 15, 15, 11, modelWidth(opts)}
+func reportWidths(q core.Query, opts RenderOptions, cols []fieldColumn) []int {
+	widths := make([]int, len(cols))
+	for i, col := range cols {
+		switch col.name {
+		case "key":
+			widths[i] = minWidth(q, opts)
+		case "models":
+			widths[i] = modelWidth(opts)
+		default:
+			widths[i] = col.width
+		}
+	}
+	return widths
+}
+
+type fieldColumn struct {
+	name      string
+	header    string
+	csvHeader string
+	width     int
+	left      bool
+	value     func(core.Row) string
+	total     func(core.Tokens) string
+}
+
+var fieldRegistry = map[string]fieldColumn{
+	"key":        {name: "key", csvHeader: "key", left: true, value: func(r core.Row) string { return r.Key }, total: func(core.Tokens) string { return "Total" }},
+	"source":     {name: "source", header: "Source", csvHeader: "source", width: 10, left: true, value: func(r core.Row) string { return r.Source }},
+	"session_id": {name: "session_id", header: "Session ID", csvHeader: "session_id", width: 18, left: true, value: func(r core.Row) string { return r.SessionID }},
+	"project":    {name: "project", header: "Project", csvHeader: "project", width: 24, left: true, value: func(r core.Row) string { return r.Project }},
+	"start":      {name: "start", header: "Start", csvHeader: "start", width: 20, left: true, value: func(r core.Row) string { return formatTime(r.Start) }},
+	"last":       {name: "last", header: "Last Activity", csvHeader: "last_activity", width: 20, left: true, value: func(r core.Row) string { return formatTime(r.LastActivity) }},
+	"duration":   {name: "duration", header: "Duration", csvHeader: "duration", width: 10, value: func(r core.Row) string { return formatDuration(r.LastActivity.Sub(r.Start)) }},
+	"input":      {name: "input", header: "Input", csvHeader: "input_tokens", width: 15, value: func(r core.Row) string { return formatInt(r.Input) }, total: func(t core.Tokens) string { return formatInt(t.Input) }},
+	"output":     {name: "output", header: "Output", csvHeader: "output_tokens", width: 12, value: func(r core.Row) string { return formatInt(r.Output) }, total: func(t core.Tokens) string { return formatInt(t.Output) }},
+	"cache_cr":   {name: "cache_cr", header: "Cache Cr.", csvHeader: "cache_creation_tokens", width: 12, value: func(r core.Row) string { return formatInt(r.CacheCreation) }, total: func(t core.Tokens) string { return formatInt(t.CacheCreation) }},
+	"cache_rd":   {name: "cache_rd", header: "Cache Rd.", csvHeader: "cache_read_tokens", width: 15, value: func(r core.Row) string { return formatInt(r.CacheRead) }, total: func(t core.Tokens) string { return formatInt(t.CacheRead) }},
+	"cache":      {name: "cache", header: "Cache", csvHeader: "cache_tokens", width: 15, value: func(r core.Row) string { return formatInt(r.CacheCreation + r.CacheRead) }, total: func(t core.Tokens) string { return formatInt(t.CacheCreation + t.CacheRead) }},
+	"reasoning":  {name: "reasoning", header: "Reasoning", csvHeader: "reasoning_tokens", width: 15, value: func(r core.Row) string { return formatInt(r.Reasoning) }, total: func(t core.Tokens) string { return formatInt(t.Reasoning) }},
+	"total":      {name: "total", header: "Total", csvHeader: "total_tokens", width: 15, value: func(r core.Row) string { return formatInt(r.Total()) }, total: func(t core.Tokens) string { return formatInt(t.Total()) }},
+	"cost":       {name: "cost", header: "Cost", csvHeader: "cost_usd", width: 11, value: func(r core.Row) string { return formatCost(r.CostUSD) }, total: func(t core.Tokens) string { return formatCost(t.CostUSD) }},
+	"credits":    {name: "credits", header: "Credits", csvHeader: "credits", width: 11, value: func(r core.Row) string { return fmt.Sprintf("%.6f", r.Credits) }, total: func(t core.Tokens) string { return fmt.Sprintf("%.6f", t.Credits) }},
+	"models":     {name: "models", header: "Models", csvHeader: "models", left: true, value: func(r core.Row) string { return strings.Join(r.ModelsUsed, ",") }},
+}
+
+var fieldAliases = map[string]string{
+	"cache_creation": "cache_cr",
+	"cache_read":     "cache_rd",
+	"model":          "models",
+}
+
+var defaultTableFields = []string{"key", "input", "output", "cache_cr", "cache_rd", "total", "cost", "models"}
+
+func validFieldNames() []string {
+	return []string{"key", "input", "output", "cache_cr", "cache_rd", "cache", "reasoning", "total", "cost", "credits", "models", "source", "session_id", "project", "start", "last", "duration"}
+}
+
+// formatDuration renders a row's active span (LastActivity-Start) compactly,
+// e.g. "8h30m". Negative or zero spans render as "0m".
+func formatDuration(d time.Duration) string {
+	if d <= 0 {
+		return "0m"
+	}
+	s := d.Round(time.Minute).String()
+	if trimmed := strings.TrimSuffix(s, "0s"); trimmed != "" {
+		s = trimmed
+	}
+	return s
+}
+
+func parseFields(s string) ([]string, error) {
+	var fields []string
+	for _, part := range strings.Split(s, ",") {
+		name := strings.TrimSpace(part)
+		if name == "" {
+			continue
+		}
+		if alias, ok := fieldAliases[name]; ok {
+			name = alias
+		}
+		if _, ok := fieldRegistry[name]; !ok {
+			return nil, fmt.Errorf("unknown field %q; valid fields: %s", name, strings.Join(validFieldNames(), ", "))
+		}
+		fields = append(fields, name)
+	}
+	if len(fields) == 0 {
+		return nil, fmt.Errorf("--fields must include at least one field; valid fields: %s", strings.Join(validFieldNames(), ", "))
+	}
+	return fields, nil
+}
+
+func selectedColumns(q core.Query, opts RenderOptions) []fieldColumn {
+	fields := opts.Fields
+	if len(fields) == 0 {
+		fields = defaultTableFields
+	}
+	cols := make([]fieldColumn, 0, len(fields))
+	for _, name := range fields {
+		col := fieldRegistry[name]
+		if name == "key" {
+			col.header = keyHeader(q)
+		}
+		cols = append(cols, col)
+	}
+	return cols
+}
+
+func columnHeaders(cols []fieldColumn, q core.Query) []string {
+	headers := make([]string, len(cols))
+	for i, col := range cols {
+		if col.name == "key" {
+			headers[i] = keyHeader(q)
+			continue
+		}
+		headers[i] = col.header
+	}
+	return headers
+}
+
+func csvHeaders(cols []fieldColumn) []string {
+	headers := make([]string, len(cols))
+	for i, col := range cols {
+		headers[i] = col.csvHeader
+	}
+	return headers
+}
+
+func rowCells(cols []fieldColumn, row core.Row, _ core.Query, breakdown bool, csvMode bool, widths []int) []string {
+	cells := make([]string, len(cols))
+	for i, col := range cols {
+		if breakdown && col.name == "models" {
+			cells[i] = ""
+			continue
+		}
+		if csvMode {
+			cells[i] = csvFieldValue(col.name, row)
+		} else {
+			cells[i] = col.value(row)
+		}
+		if breakdown && col.name == "key" && !strings.HasPrefix(cells[i], "  ") {
+			if !csvMode && len(widths) > i {
+				cells[i] = "  " + truncate(cells[i], widths[i]-2)
+			} else {
+				cells[i] = "  " + cells[i]
+			}
+		}
+	}
+	return cells
+}
+
+func csvFieldValue(name string, row core.Row) string {
+	switch name {
+	case "input":
+		return fmt.Sprintf("%d", row.Input)
+	case "output":
+		return fmt.Sprintf("%d", row.Output)
+	case "cache_cr":
+		return fmt.Sprintf("%d", row.CacheCreation)
+	case "cache_rd":
+		return fmt.Sprintf("%d", row.CacheRead)
+	case "reasoning":
+		return fmt.Sprintf("%d", row.Reasoning)
+	case "total":
+		return fmt.Sprintf("%d", row.Total())
+	case "cost":
+		return fmt.Sprintf("%.6f", row.CostUSD)
+	case "credits":
+		return fmt.Sprintf("%.6f", row.Credits)
+	case "models":
+		return strings.Join(row.ModelsUsed, ";")
+	default:
+		return fieldRegistry[name].value(row)
+	}
+}
+
+func totalCells(cols []fieldColumn, totals core.Tokens) []string {
+	cells := make([]string, len(cols))
+	for i, col := range cols {
+		if col.total != nil {
+			cells[i] = col.total(totals)
+		}
+	}
+	return cells
+}
+
+func htmlHeaderRow(cols []fieldColumn, q core.Query) string {
+	var b strings.Builder
+	b.WriteString(`<table><thead><tr>`)
+	for _, header := range columnHeaders(cols, q) {
+		b.WriteString(`<th>`)
+		b.WriteString(html.EscapeString(header))
+		b.WriteString(`</th>`)
+	}
+	b.WriteString(`</tr></thead><tbody>`)
+	return b.String()
 }
 
 func formatCost(f float64) string {

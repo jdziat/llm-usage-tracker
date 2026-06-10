@@ -119,3 +119,33 @@ func TestGoldenHTML(t *testing.T) {
 	normalized := htmlGeneratedLine.ReplaceAll(buf.Bytes(), []byte("Generated TIMESTAMP. View"))
 	assertGolden(t, "report.html", normalized)
 }
+
+// The table/pretty renderers were rewritten onto the fieldColumn registry in
+// P1a; these goldens lock their byte output (the JSON/CSV/HTML goldens did not
+// cover the human-readable table path).
+func TestGoldenTable(t *testing.T) {
+	q, opts, res := goldenFixture()
+	var buf bytes.Buffer
+	writeTable(&buf, title(q), res, q, opts)
+	assertGolden(t, "report.table", buf.Bytes())
+}
+
+func TestGoldenPretty(t *testing.T) {
+	q, opts, res := goldenFixture()
+	var buf bytes.Buffer
+	writePrettyTable(&buf, title(q), res, q, opts)
+	assertGolden(t, "report.pretty", buf.Bytes())
+}
+
+// Locks --fields selection, ordering, and the cache/duration tokens added in P1a.
+func TestGoldenFieldsTable(t *testing.T) {
+	q, opts, res := goldenFixture()
+	fields, err := parseFields("key,input,cache,duration,reasoning,total,cost,credits")
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts.Fields = fields
+	var buf bytes.Buffer
+	writeTable(&buf, title(q), res, q, opts)
+	assertGolden(t, "report.fields.table", buf.Bytes())
+}

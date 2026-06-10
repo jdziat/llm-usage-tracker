@@ -60,3 +60,28 @@ func TestWriteHTMLReport(t *testing.T) {
 		t.Fatalf("missing escaped warning: %s", out)
 	}
 }
+
+func TestFieldsSelectionAndOrdering(t *testing.T) {
+	fields, err := parseFields("models,cost,total")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := writeCSV(&buf, RenderOptions{Fields: fields}, sampleRows()); err != nil {
+		t.Fatal(err)
+	}
+	want := "models,cost_usd,total_tokens\ngpt-5.5,0.001000,33\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("selected CSV fields mismatch\ngot:\n%s\nwant:\n%s", got, want)
+	}
+
+	buf.Reset()
+	Render(&buf, core.Result{Rows: sampleRows(), Totals: core.Tokens{Input: 10, Output: 3, CacheRead: 20, CostUSD: 0.001}}, core.Query{View: "daily"}, RenderOptions{Fields: fields})
+	out := buf.String()
+	modelIdx := strings.Index(out, "Models")
+	costIdx := strings.Index(out, "Cost")
+	totalIdx := strings.Index(out, "Total")
+	if modelIdx < 0 || costIdx < 0 || totalIdx < 0 || !(modelIdx < costIdx && costIdx < totalIdx) {
+		t.Fatalf("table did not honor selected field order:\n%s", out)
+	}
+}

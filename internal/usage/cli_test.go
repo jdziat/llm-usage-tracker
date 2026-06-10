@@ -1,6 +1,10 @@
 package usage
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -40,5 +44,91 @@ func TestParseArgsRejectsSourceAfterView(t *testing.T) {
 func TestParseArgsRejectsUnknownPositional(t *testing.T) {
 	if _, _, _, err := parseArgs([]string{"daily", "bogus"}); err == nil {
 		t.Fatal("expected error for unknown positional, got nil")
+	}
+}
+
+func TestParseArgsRejectsUnknownField(t *testing.T) {
+	_, _, _, err := parseArgs([]string{"--fields", "bogus,cost"})
+	if err == nil {
+		t.Fatal("expected unknown field error, got nil")
+	}
+	if !strings.Contains(err.Error(), "unknown field") || !strings.Contains(err.Error(), "valid fields") {
+		t.Fatalf("error = %q, want valid fields message", err.Error())
+	}
+}
+
+func TestConfigPrecedenceAndMissingFile(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(configPath, []byte(`{
+		"source":"claude",
+		"view":"summary",
+		"format":"pretty",
+		"timezone":"UTC",
+		"order":"asc",
+		"start_of_week":"sunday",
+		"mode":"calculate",
+		"speed":"standard",
+		"top":5,
+		"session_length":5,
+		"fields":"models,cost,total"
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	q, opts, _, err := parseArgs([]string{"--config", configPath, "--format", "json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := q.Sources; len(got) != 1 || got[0] != "claude" {
+		t.Fatalf("sources = %v, want config source claude", got)
+	}
+	if q.View != "summary" {
+		t.Fatalf("view = %q, want config view summary", q.View)
+	}
+	if opts.Format != "json" {
+		t.Fatalf("format = %q, want explicit flag json", opts.Format)
+	}
+	if q.Order != "asc" || q.StartOfWeek != "sunday" || q.Mode != "calculate" || q.Speed != "standard" || q.Top != 5 {
+		t.Fatalf("config defaults not applied: q=%+v", q)
+	}
+	if q.Location.String() != "UTC" {
+		t.Fatalf("timezone = %q, want UTC", q.Location)
+	}
+	if q.SessionLength != 5*time.Hour {
+		t.Fatalf("session length = %v, want 5h", q.SessionLength)
+	}
+	if got := strings.Join(opts.Fields, ","); got != "models,cost,total" {
+		t.Fatalf("fields = %q, want config fields", got)
+	}
+
+	q, opts, _, err = parseArgs([]string{"--config", filepath.Join(dir, "missing.json")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q.View != "daily" || opts.Format != "table" {
+		t.Fatalf("missing config changed defaults: view=%q format=%q", q.View, opts.Format)
+	}
+}
+
+func TestCompletion(t *testing.T) {
+	for _, shell := range []string{"bash", "zsh", "fish"} {
+		t.Run(shell, func(t *testing.T) {
+			var out bytes.Buffer
+			if err := Run([]string{"completion", shell}, &out, &bytes.Buffer{}); err != nil {
+				t.Fatal(err)
+			}
+			if strings.TrimSpace(out.String()) == "" {
+				t.Fatalf("%s completion was empty", shell)
+			}
+		})
+	}
+	var out bytes.Buffer
+	err := Run([]string{"completion", "powershell"}, &out, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected invalid shell error, got nil")
+	}
+	if !strings.Contains(err.Error(), "supported shells") {
+		t.Fatalf("error = %q, want supported shells", err.Error())
 	}
 }
