@@ -93,7 +93,9 @@
 
   --amber-fill: rgba(200, 127, 30, 0.14);
   --teal-fill: rgba(44, 141, 130, 0.12);
-  --grid: rgba(26, 29, 35, 0.1);
+  /* Faint warm-gray hairline — sits behind the data, matching the dark theme's
+     restraint (was 0.1 ink, which competed with the axis labels). */
+  --grid: rgba(40, 34, 28, 0.06);
 
   color-scheme: light;
 }

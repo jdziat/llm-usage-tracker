@@ -128,6 +128,24 @@
     return () => ro.disconnect();
   });
 
+  // When a row's models share a provider prefix (claude-opus-4-8 / -sonnet-4-6 /
+  // -haiku-4-5), strip it from the chip labels so the differentiating suffix is
+  // what shows — otherwise the chips truncate exactly on the part that matters.
+  // The full names stay in the cell's title tooltip and the breakdown rows.
+  function sharedModelPrefix(models: string[]): string {
+    if (models.length < 2) return '';
+    let p = models[0];
+    for (const m of models.slice(1)) {
+      while (p && !m.startsWith(p)) p = p.slice(0, -1);
+      if (!p) return '';
+    }
+    const i = p.lastIndexOf('-');
+    return i > 0 ? p.slice(0, i + 1) : '';
+  }
+  function chipLabel(m: string, prefix: string): string {
+    return prefix && m.startsWith(prefix) && m.length > prefix.length ? m.slice(prefix.length) : m;
+  }
+
   function cell(r: Row, id: ColId): { text: string; muted?: boolean; cls?: string } {
     switch (id) {
       case 'input':
@@ -212,9 +230,10 @@
                     {r.source ?? sourceForModel(r.modelsUsed?.[0] ?? '') ?? '—'}
                   </span>
                 {:else if c.id === 'models'}
+                  {@const shared = sharedModelPrefix(r.modelsUsed ?? [])}
                   <span class="td models" title={r.modelsUsed?.join(', ')}>
                     {#each (r.modelsUsed ?? []).slice(0, 3) as m (m)}
-                      <span class="model-chip" class:unpriced={!isPriced(m)}>{m}</span>
+                      <span class="model-chip" class:unpriced={!isPriced(m)}>{chipLabel(m, shared)}</span>
                     {/each}
                     {#if (r.modelsUsed?.length ?? 0) > 3}<span class="more">+{(r.modelsUsed?.length ?? 0) - 3}</span>{/if}
                   </span>
@@ -471,6 +490,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     max-width: 100%;
+    flex-shrink: 0;
   }
   .model-chip.unpriced {
     border-style: dashed;
