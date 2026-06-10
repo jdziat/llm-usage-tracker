@@ -1,0 +1,104 @@
+name: Desktop Release
+
+# Builds the Wails v2 desktop app (desktop/) for each OS on tag pushes and
+# attaches the produced bundles to the GitHub release.
+#
+# NOTE: the macOS (.app) and Windows (.exe) bundles ship UNSIGNED for now.
+# Code signing / notarization (Apple) and Authenticode (Windows) is P4 work —
+# until then users will see Gatekeeper / SmartScreen warnings on first launch.
+#
+# The CLI release is handled separately by release.yml / .goreleaser.yaml; this
+# workflow only touches the desktop module.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  desktop-release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            arch: amd64
+          - os: macos-latest
+            platform: darwin
+            arch: arm64
+          - os: windows-latest
+            platform: windows
+            arch: amd64
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: desktop/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: desktop/frontend/package-lock.json
+
+      # Wails v2 Linux build needs WebKit2GTK 4.1 + GTK3 headers.
+      - name: Install Linux WebKit/GTK dependencies
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev
+
+      # Install the Wails v2 CLI (NOT v3 — v3 cannot be built in this project).
+      - name: Install Wails v2 CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      # `wails build` runs the frontend install/build (per wails.json) and then
+      # compiles + bundles the Go app into desktop/build/bin/.
+      - name: Wails build
+        working-directory: desktop
+        run: wails build -clean -platform ${{ matrix.platform }}/${{ matrix.arch }}
+
+      # Package the platform bundle under a predictable, OS/arch-tagged name.
+      - name: Package bundle
+        working-directory: desktop
+        run: |
+          set -euo pipefail
+          asset="llmut-desktop-${{ matrix.platform }}-${{ matrix.arch }}"
+          ls -la build/bin
+          case "${{ matrix.platform }}" in
+            darwin)
+              # Wails emits a .app bundle (a directory) on macOS; zip it.
+              app=$(ls -d build/bin/*.app | head -n1)
+              zip -r -y "${asset}.zip" "$app"
+              ;;
+            windows)
+              exe=$(ls build/bin/*.exe | head -n1)
+              # Use 7z (present on GitHub Windows runners) for a portable zip.
+              7z a "${asset}.zip" "$exe"
+              ;;
+            linux)
+              bin="build/bin/llmut"
+              chmod +x "$bin"
+              tar -czf "${asset}.tar.gz" -C build/bin llmut
+              ;;
+          esac
+
+      - name: Upload bundle to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            desktop/llmut-desktop-${{ matrix.platform }}-${{ matrix.arch }}.*
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

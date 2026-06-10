@@ -1,154 +1,189 @@
-:root {
-  color: #1f2328;
-  background: #f6f8fa;
-  font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
+/* ── Bundled fonts (offline, no CDN) ───────────────────────────────────── */
+/* IBM Plex Mono: every number (costs / tokens / dates) — instrument readout. */
+@import '@fontsource/ibm-plex-mono/400.css';
+@import '@fontsource/ibm-plex-mono/500.css';
+@import '@fontsource/ibm-plex-mono/600.css';
+/* Geist: UI text / labels — a grotesque with a mechanical bone structure. */
+@import '@fontsource/geist-sans/400.css';
+@import '@fontsource/geist-sans/500.css';
+@import '@fontsource/geist-sans/600.css';
+/* uPlot base styles (the canvas chrome — we override colors via tokens). */
+@import 'uplot/dist/uPlot.min.css';
+
+/* ── Design tokens ─────────────────────────────────────────────────────── */
+/* Default DARK theme: "Graphite" — oscilloscope on warm graphite.          */
+:root,
+:root[data-theme='dark'] {
+  --canvas: #0e1116;
+  --surface: #171b22;
+  --surface-raised: #1f242d;
+  --hairline: #2a3039;
+  --hairline-strong: #3a4250;
+  --text: #e6e1d6; /* warm off-white — phosphor on graphite */
+  --text-muted: #8b94a3;
+  --text-faint: #5c6573;
+
+  /* signal language */
+  --amber: #f2a33c; /* primary accent — spend, KPIs, the trace */
+  --amber-dim: #b97e34;
+  --teal: #3fb6a8; /* counter-accent — savings / good */
+  --red: #e5484d;
+  --caution: #e3b341;
+
+  /* source identity */
+  --src-claude: #d97757;
+  --src-codex: #10a37f;
+  --src-opencode: #6e9fec;
+  --src-amp: #c77dff;
+  --src-pi: #e8c547;
+
+  /* token-category viz palette */
+  --tok-input: #5aa9e6;
+  --tok-output: #3fb6a8;
+  --tok-cache-create: #9b8afb;
+  --tok-cache-read: #4c5a6e; /* deliberately dim — it's cheap */
+  --tok-reasoning: #f2a33c;
+
+  /* fills derived from the accent — scope-trace area */
+  --amber-fill: rgba(242, 163, 60, 0.16);
+  --teal-fill: rgba(63, 182, 168, 0.14);
+  --grid: #2a3039;
+
+  /* shape */
+  --r-card: 6px;
+  --r-chip: 4px;
+
+  /* density (overridden by [data-density='compact']) */
+  --row-h: 34px;
+  --pad-card: 18px;
+  --gap: 16px;
+  --num-size: 14px;
+
+  color-scheme: dark;
 }
 
+/* LIGHT theme: "Paper" — warm canvas, same signals. A first-class equal.    */
+:root[data-theme='light'] {
+  --canvas: #f7f4ec;
+  --surface: #ffffff;
+  --surface-raised: #f0ece1;
+  --hairline: #ddd6c6;
+  --hairline-strong: #c7bfac;
+  --text: #1a1d23; /* ink */
+  --text-muted: #6a6f7a;
+  --text-faint: #9aa0ac;
+
+  --amber: #c87f1e;
+  --amber-dim: #9c6417;
+  --teal: #2c8d82;
+  --red: #c93a3f;
+  --caution: #b5862a;
+
+  --src-claude: #c25c3c;
+  --src-codex: #0d8568;
+  --src-opencode: #4d7fcc;
+  --src-amp: #9c52d6;
+  --src-pi: #b59321;
+
+  --tok-input: #3d82bf;
+  --tok-output: #2c8d82;
+  --tok-cache-create: #7560d6;
+  --tok-cache-read: #8a93a3;
+  --tok-reasoning: #c87f1e;
+
+  --amber-fill: rgba(200, 127, 30, 0.14);
+  --teal-fill: rgba(44, 141, 130, 0.12);
+  --grid: rgba(26, 29, 35, 0.1);
+
+  color-scheme: light;
+}
+
+[data-density='compact'] {
+  --row-h: 26px;
+  --pad-card: 12px;
+  --gap: 12px;
+  --num-size: 12.5px;
+}
+
+/* ── Resets & base ─────────────────────────────────────────────────────── */
 * {
   box-sizing: border-box;
 }
 
+html,
 body {
-  min-width: 320px;
-  min-height: 100vh;
   margin: 0;
+  height: 100%;
 }
 
-main {
-  width: min(1040px, calc(100vw - 32px));
-  margin: 0 auto;
-  padding: 32px 0;
+body {
+  background: var(--canvas);
+  color: var(--text);
+  font-family: 'Geist Sans', ui-sans-serif, system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-synthesis: none;
+  overflow: hidden; /* the app manages its own scroll regions */
 }
 
-header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  margin-bottom: 24px;
+#app {
+  height: 100vh;
 }
 
 h1,
+h2,
+h3,
 p {
   margin: 0;
 }
 
-h1 {
-  font-size: 32px;
-  line-height: 1.15;
-  font-weight: 700;
+button {
+  font-family: inherit;
+  color: inherit;
+  cursor: pointer;
 }
 
-.eyebrow {
-  margin-bottom: 6px;
-  color: #57606a;
-  font-size: 13px;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
-.state,
-.warnings,
-.table-wrap,
-.totals > div {
-  border: 1px solid #d0d7de;
-  border-radius: 8px;
-  background: #ffffff;
-}
-
-.state {
-  padding: 32px;
-  color: #57606a;
-}
-
-.state.error {
-  border-color: #cf222e;
-  color: #cf222e;
-}
-
-.totals {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.totals > div {
-  padding: 16px;
-}
-
-.totals span {
-  display: block;
-  margin-bottom: 8px;
-  color: #57606a;
-  font-size: 13px;
-}
-
-.totals strong {
-  display: block;
-  font-size: 22px;
-  line-height: 1.2;
-}
-
-.warnings {
-  margin-bottom: 16px;
-  padding: 12px 16px;
-  border-color: #d4a72c;
-  color: #7d4e00;
-}
-
-.warnings p + p {
-  margin-top: 8px;
-}
-
-.table-wrap {
-  overflow: auto;
-}
-
-table {
-  width: 100%;
-  border-collapse: collapse;
-  min-width: 860px;
-}
-
-th,
-td {
-  padding: 12px 14px;
-  border-bottom: 1px solid #d8dee4;
-  text-align: left;
-  vertical-align: top;
-  font-size: 14px;
-}
-
-thead th {
-  position: sticky;
-  top: 0;
-  background: #f6f8fa;
-  color: #57606a;
-  font-size: 12px;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
-tbody tr:last-child th,
-tbody tr:last-child td {
-  border-bottom: 0;
-}
-
+/* Every number is mono + tabular — the core of the instrument character. */
+.mono,
 .num {
-  text-align: right;
-  white-space: nowrap;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1, 'zero' 1;
 }
 
-@media (max-width: 760px) {
-  main {
-    width: min(100vw - 20px, 1040px);
-    padding: 20px 0;
-  }
+/* ── Scrollbars (themed, thin) ─────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--hairline-strong);
+  border-radius: 6px;
+  border: 2px solid var(--canvas);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-faint);
+}
 
-  .totals {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+/* ── uPlot theming overrides (flat, hairline-gridded scope look) ───────── */
+.uplot,
+.uplot * {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace !important;
+}
+.u-axis {
+  color: var(--text-muted);
+}
+.u-legend {
+  display: none; /* we render our own readouts */
+}
+
+/* keyboard focus — sharp, never a glossy ring */
+:focus-visible {
+  outline: 1.5px solid var(--amber);
+  outline-offset: 1px;
 }

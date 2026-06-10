@@ -8,6 +8,8 @@ This document makes seven decisions and defends each against cost, risk, and mai
 
 ## Decision 1 — Wails v3 (not v2)
 
+> **Implementation status (P2/P3):** shipped on **Wails v2**, not v3. The build/CI environment could not compile v3 (it requires WebKitGTK 6.0 / GTK4, which was not installable there), so the project took the documented v2 fallback below. The Wails surface is confined to `desktop/main.go` and one `runtime.EventsEmit` call; `desktop/app.go` is pure `pkg/core`, so the v3 move remains the ~1-day mechanical change described here. The runtime API references below (`application.New`, `application.Get().EmitEvent`) are the v3 target, not what ships today.
+
 **Pick: Wails v3 (alpha).**
 
 | Factor | v2 (stable) | v3 (alpha) | Verdict |

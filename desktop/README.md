@@ -9,6 +9,10 @@ cd desktop
 wails dev
 ```
 
+Live updates are delivered through the Wails runtime event bus. They only run
+inside `wails dev` or a built desktop app; the browser-only mock frontend
+intentionally skips the subscription because `window.runtime` is absent.
+
 ## Build Locally
 
 ```sh

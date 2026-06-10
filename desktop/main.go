@@ -21,7 +21,9 @@ func main() {
 		AssetServer: &assetserver.Options{
 			Assets: embeddedFS,
 		},
-		Bind: []interface{}{svc},
+		OnStartup:  svc.OnStartup,
+		OnShutdown: svc.OnShutdown,
+		Bind:       []interface{}{svc},
 	})
 	if err != nil {
 		println("error:", err.Error())
