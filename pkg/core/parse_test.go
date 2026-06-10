@@ -3,6 +3,7 @@ package core
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -90,6 +91,28 @@ func TestReadClaudeSkipsZeroTokenSyntheticEvents(t *testing.T) {
 	}
 	if events[0].Model == "<synthetic>" {
 		t.Fatal("synthetic event was not filtered")
+	}
+}
+
+func TestReadClaudeTolerantSkipsScannerErrorFile(t *testing.T) {
+	root := t.TempDir()
+	projectDir := filepath.Join(root, "project")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(projectDir, "session.jsonl")
+	valid := `{"requestId":"req_1","type":"assistant","timestamp":"2026-05-18T10:00:00Z","cwd":"/work/repo","sessionId":"s1","message":{"role":"assistant","model":"claude-sonnet-4-6","usage":{"input_tokens":10,"cache_creation_input_tokens":2,"cache_read_input_tokens":3,"output_tokens":4}}}`
+	tooLong := strings.Repeat("x", 16*1024*1024+1)
+	if err := os.WriteFile(logPath, []byte(valid+"\n{"+tooLong+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := readClaude([]string{root}, Query{Tolerant: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("expected tolerant mode to skip scanner-error file, got %d events", len(events))
 	}
 }
 

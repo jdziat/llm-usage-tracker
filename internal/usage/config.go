@@ -28,6 +28,7 @@ type fileConfig struct {
 	Order           string            `json:"order"`
 	StartOfWeek     string            `json:"start_of_week"`
 	Mode            string            `json:"mode"`
+	By              string            `json:"by"`
 	Project         string            `json:"project"`
 	ID              string            `json:"id"`
 	Top             *int              `json:"top"`
@@ -42,7 +43,46 @@ type fileConfig struct {
 	RefreshInterval configString      `json:"refresh_interval"`
 	Speed           string            `json:"speed"`
 	Fields          string            `json:"fields"`
+	Budget          budgetConfig      `json:"budget"`
 	Paths           map[string]string `json:"paths"`
+}
+
+type budgetConfig struct {
+	Budget      *float64 `json:"budget"`
+	MonthlyUSD  *float64 `json:"monthly_usd"`
+	WeeklyUSD   *float64 `json:"weekly_usd"`
+	DailyUSD    *float64 `json:"daily_usd"`
+	Period      string   `json:"period"`
+	TokenBudget *int64   `json:"token_budget"`
+	Exit        *bool    `json:"exit"`
+}
+
+func (b *budgetConfig) UnmarshalJSON(data []byte) error {
+	type raw budgetConfig
+	var r raw
+	if err := json.Unmarshal(data, &r); err != nil {
+		return err
+	}
+	*b = budgetConfig(r)
+	switch {
+	case b.Budget != nil:
+	case b.MonthlyUSD != nil:
+		b.Budget = b.MonthlyUSD
+		if b.Period == "" {
+			b.Period = "month"
+		}
+	case b.WeeklyUSD != nil:
+		b.Budget = b.WeeklyUSD
+		if b.Period == "" {
+			b.Period = "week"
+		}
+	case b.DailyUSD != nil:
+		b.Budget = b.DailyUSD
+		if b.Period == "" {
+			b.Period = "day"
+		}
+	}
+	return nil
 }
 
 type configString string

@@ -13,13 +13,18 @@ import (
 )
 
 type RenderOptions struct {
-	Format     string
-	OutputPath string
-	Breakdown  bool
-	Compact    bool
-	TokenLimit int64
-	Debug      bool
-	Fields     []string
+	Format       string
+	OutputPath   string
+	Breakdown    bool
+	Compact      bool
+	TokenLimit   int64
+	Debug        bool
+	Fields       []string
+	Budget       float64
+	BudgetPeriod string
+	TokenBudget  int64
+	BudgetExit   bool
+	BudgetStatus *BudgetStatus
 
 	progress        bool
 	refreshInterval time.Duration
@@ -82,6 +87,10 @@ func writeTable(w io.Writer, title string, res core.Result, q core.Query, opts R
 	}
 	printSep(w, widths)
 	printColumnRow(w, widths, cols, totalCells(cols, res.Totals))
+	if opts.BudgetStatus != nil {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, budgetBanner(*opts.BudgetStatus))
+	}
 }
 
 func writePrettyTable(w io.Writer, title string, res core.Result, q core.Query, opts RenderOptions) {
@@ -107,6 +116,10 @@ func writePrettyTable(w io.Writer, title string, res core.Result, q core.Query, 
 	printBoxBorder(w, widths, "mid")
 	printBoxColumnRow(w, widths, cols, totalCells(cols, res.Totals))
 	printBoxBorder(w, widths, "bottom")
+	if opts.BudgetStatus != nil {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, budgetBanner(*opts.BudgetStatus))
+	}
 }
 
 func writeCSV(w io.Writer, opts RenderOptions, rows []core.Row) error {
@@ -327,6 +340,12 @@ func keyHeader(q core.Query) string {
 	case "session":
 		return "Session"
 	case "summary":
+		switch q.By {
+		case "project":
+			return "Project"
+		case "source":
+			return "Source"
+		}
 		return "Model"
 	case "blocks":
 		return "Block Start"

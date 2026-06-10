@@ -13,7 +13,7 @@ func aggregate(events []Event, cfg Query) []Row {
 	case "session":
 		return aggregateSessions(filtered, cfg)
 	case "summary":
-		return aggregateSummary(filtered, cfg)
+		return aggregateSummary(filtered, cfg, summaryKeyFunc(cfg))
 	case "weekly":
 		return aggregateByKey(filtered, cfg, func(t time.Time, loc *time.Location) string {
 			return weekKey(t, loc, cfg.StartOfWeek)
@@ -31,17 +31,14 @@ func aggregate(events []Event, cfg Query) []Row {
 	}
 }
 
-func aggregateSummary(events []Event, cfg Query) []Row {
+func aggregateSummary(events []Event, cfg Query, keyFn func(Event) string) []Row {
 	rows := map[string]*Row{}
 	for _, ev := range events {
-		model := firstNonEmpty(ev.Model, "unknown")
-		key := model
-		if len(cfg.Sources) != 1 {
-			key = SourceLabel(ev.Source) + ":" + model
-		}
+		displayKey := firstNonEmpty(keyFn(ev), "unknown")
+		key := summaryMapKey(displayKey, ev, cfg)
 		row := rows[key]
 		if row == nil {
-			row = &Row{Key: model, Source: sourceForRow(cfg, ev.Source), Start: ev.Time, LastActivity: ev.Time}
+			row = &Row{Key: displayKey, Source: sourceForRow(cfg, ev.Source), Start: ev.Time, LastActivity: ev.Time}
 			rows[key] = row
 		}
 		addEvent(row, ev)
@@ -61,6 +58,26 @@ func aggregateSummary(events []Event, cfg Query) []Row {
 		out = out[:limit]
 	}
 	return out
+}
+
+func summaryKeyFunc(cfg Query) func(Event) string {
+	switch cfg.By {
+	case "project":
+		return func(ev Event) string { return compactProject(ev.Project) }
+	case "source":
+		return func(ev Event) string { return SourceLabel(ev.Source) }
+	default:
+		return func(ev Event) string { return firstNonEmpty(ev.Model, "unknown") }
+	}
+}
+
+func summaryMapKey(displayKey string, ev Event, cfg Query) string {
+	if cfg.By == "" || cfg.By == "model" {
+		if len(cfg.Sources) != 1 {
+			return SourceLabel(ev.Source) + ":" + displayKey
+		}
+	}
+	return displayKey
 }
 
 func filterEvents(events []Event, cfg Query) []Event {

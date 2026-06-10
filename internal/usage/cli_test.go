@@ -57,6 +57,19 @@ func TestParseArgsRejectsUnknownField(t *testing.T) {
 	}
 }
 
+func TestParseArgsByFlag(t *testing.T) {
+	q, _, _, err := parseArgs([]string{"summary", "--by", "project"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q.By != "project" {
+		t.Fatalf("By = %q, want project", q.By)
+	}
+	if _, _, _, err := parseArgs([]string{"summary", "--by", "bogus"}); err == nil {
+		t.Fatal("expected invalid --by error, got nil")
+	}
+}
+
 func TestConfigPrecedenceAndMissingFile(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")
@@ -68,10 +81,12 @@ func TestConfigPrecedenceAndMissingFile(t *testing.T) {
 		"order":"asc",
 		"start_of_week":"sunday",
 		"mode":"calculate",
+		"by":"source",
 		"speed":"standard",
 		"top":5,
 		"session_length":5,
-		"fields":"models,cost,total"
+		"fields":"models,cost,total",
+		"budget":{"budget":25,"period":"week","token_budget":5000,"exit":true}
 	}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -92,6 +107,9 @@ func TestConfigPrecedenceAndMissingFile(t *testing.T) {
 	if q.Order != "asc" || q.StartOfWeek != "sunday" || q.Mode != "calculate" || q.Speed != "standard" || q.Top != 5 {
 		t.Fatalf("config defaults not applied: q=%+v", q)
 	}
+	if q.By != "source" {
+		t.Fatalf("by = %q, want source", q.By)
+	}
 	if q.Location.String() != "UTC" {
 		t.Fatalf("timezone = %q, want UTC", q.Location)
 	}
@@ -100,6 +118,9 @@ func TestConfigPrecedenceAndMissingFile(t *testing.T) {
 	}
 	if got := strings.Join(opts.Fields, ","); got != "models,cost,total" {
 		t.Fatalf("fields = %q, want config fields", got)
+	}
+	if opts.Budget != 25 || opts.BudgetPeriod != "week" || opts.TokenBudget != 5000 || !opts.BudgetExit {
+		t.Fatalf("budget config not applied: opts=%+v", opts)
 	}
 
 	q, opts, _, err = parseArgs([]string{"--config", filepath.Join(dir, "missing.json")})

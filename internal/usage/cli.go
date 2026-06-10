@@ -55,7 +55,23 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	if closeOut != nil {
 		defer closeOut()
 	}
-	return Render(out, res, q, opts)
+	status, ok, err := evaluateBudget(q, opts)
+	if err != nil {
+		return err
+	}
+	if ok && (opts.Format == "table" || opts.Format == "pretty") {
+		opts.BudgetStatus = &status
+	}
+	if err := Render(out, res, q, opts); err != nil {
+		return err
+	}
+	if ok {
+		fmt.Fprintln(stderr, budgetBanner(status))
+		if status.BudgetExceeded && opts.BudgetExit {
+			return ExitError{Code: 2, Err: fmt.Errorf("budget exceeded")}
+		}
+	}
+	return nil
 }
 
 func validateLiveConfig(opts RenderOptions) error {
@@ -76,11 +92,13 @@ func parseArgs(args []string) (core.Query, RenderOptions, bool, error) {
 		SourcePaths:   map[string][]string{},
 		Speed:         "auto",
 		StartOfWeek:   "monday",
+		By:            "model",
 	}
 	opts := RenderOptions{
 		Format:          "table",
 		progress:        true,
 		refreshInterval: 5 * time.Second,
+		BudgetPeriod:    "month",
 	}
 	if len(args) > 0 && (args[0] == "help" || args[0] == "--help" || args[0] == "-h") {
 		return q, opts, false, flag.ErrHelp
@@ -123,6 +141,7 @@ func parseArgs(args []string) (core.Query, RenderOptions, bool, error) {
 	fs.StringVar(&q.Order, "order", "desc", "asc or desc")
 	fs.StringVar(&q.StartOfWeek, "start-of-week", "monday", "monday or sunday")
 	fs.StringVar(&q.Mode, "mode", "auto", "auto, calculate, display")
+	fs.StringVar(&q.By, "by", "model", "summary rollup: model, project, or source")
 	fs.StringVar(&q.Project, "project", "", "project filter")
 	fs.StringVar(&q.Project, "p", "", "project filter")
 	fs.StringVar(&q.ID, "id", "", "session id filter")
@@ -138,6 +157,10 @@ func parseArgs(args []string) (core.Query, RenderOptions, bool, error) {
 	fs.StringVar(&refresh, "refresh-interval", "5", "refresh interval seconds")
 	fs.StringVar(&q.Speed, "speed", "auto", "codex pricing speed: auto, standard, fast")
 	fs.StringVar(&fields, "fields", "", "comma-separated columns for table, pretty, and csv output; JSON always emits full rows")
+	fs.Float64Var(&opts.Budget, "budget", 0, "cost budget in USD")
+	fs.StringVar(&opts.BudgetPeriod, "budget-period", "month", "budget window: day, week, or month")
+	fs.Int64Var(&opts.TokenBudget, "token-budget", 0, "token budget")
+	fs.BoolVar(&opts.BudgetExit, "budget-exit", false, "exit with code 2 when over budget")
 	fs.StringVar(&ignoredLocale, "locale", "", "no-op, accepted for ccusage compatibility")
 	fs.Int("debug-samples", 0, "no-op, accepted for ccusage compatibility")
 	fs.StringVar(&configPath, "config", "", "config file path")
@@ -225,8 +248,14 @@ func parseArgs(args []string) (core.Query, RenderOptions, bool, error) {
 	if q.Mode != "auto" && q.Mode != "calculate" && q.Mode != "display" {
 		return q, opts, live, fmt.Errorf("--mode must be auto, calculate, or display")
 	}
+	if q.By != "model" && q.By != "project" && q.By != "source" {
+		return q, opts, live, fmt.Errorf("--by must be model, project, or source")
+	}
 	if q.Speed != "auto" && q.Speed != "standard" && q.Speed != "fast" {
 		return q, opts, live, fmt.Errorf("--speed must be auto, standard, or fast")
+	}
+	if opts.BudgetPeriod != "day" && opts.BudgetPeriod != "week" && opts.BudgetPeriod != "month" {
+		return q, opts, live, fmt.Errorf("--budget-period must be day, week, or month")
 	}
 	if q.Speed == "auto" {
 		q.Speed = core.DetectCodexSpeed()
@@ -365,6 +394,9 @@ func applyConfigDefaults(path string, explicit map[string]bool, q *core.Query, o
 	if cfg.Mode != "" && !explicit["mode"] {
 		q.Mode = cfg.Mode
 	}
+	if cfg.By != "" && !explicit["by"] {
+		q.By = cfg.By
+	}
 	if cfg.Project != "" && !explicit["project"] {
 		q.Project = cfg.Project
 	}
@@ -406,6 +438,18 @@ func applyConfigDefaults(path string, explicit map[string]bool, q *core.Query, o
 	}
 	if cfg.Fields != "" && !explicit["fields"] {
 		*fields = cfg.Fields
+	}
+	if cfg.Budget.Budget != nil && !explicit["budget"] {
+		opts.Budget = *cfg.Budget.Budget
+	}
+	if cfg.Budget.Period != "" && !explicit["budget-period"] {
+		opts.BudgetPeriod = cfg.Budget.Period
+	}
+	if cfg.Budget.TokenBudget != nil && !explicit["token-budget"] {
+		opts.TokenBudget = *cfg.Budget.TokenBudget
+	}
+	if cfg.Budget.Exit != nil && !explicit["budget-exit"] {
+		opts.BudgetExit = *cfg.Budget.Exit
 	}
 	for source, value := range cfg.Paths {
 		switch source {
@@ -522,9 +566,11 @@ _llmut() {
     --start-of-week) COMPREPLY=( $(compgen -W "monday sunday" -- "$cur") ); return 0 ;;
     --mode) COMPREPLY=( $(compgen -W "auto calculate display" -- "$cur") ); return 0 ;;
     --speed) COMPREPLY=( $(compgen -W "auto standard fast" -- "$cur") ); return 0 ;;
+    --by) COMPREPLY=( $(compgen -W "model project source" -- "$cur") ); return 0 ;;
+    --budget-period) COMPREPLY=( $(compgen -W "day week month" -- "$cur") ); return 0 ;;
   esac
   if [[ "$cur" == -* ]]; then
-    COMPREPLY=( $(compgen -W "--json -j --format --output -o --breakdown -b --instances -i --active -a --recent -r --compact --debug --live --progress --no-progress --cache --offline -O --since --until --timezone -z --order --start-of-week --mode --project -p --id --top --path --claude-path --codex-path --opencode-path --amp-path --pi-path --token-limit --session-length --refresh-interval --speed --fields --config --locale --debug-samples --help -h" -- "$cur") )
+    COMPREPLY=( $(compgen -W "--json -j --format --output -o --breakdown -b --instances -i --active -a --recent -r --compact --debug --live --progress --no-progress --cache --offline -O --since --until --timezone -z --order --start-of-week --mode --by --project -p --id --top --path --claude-path --codex-path --opencode-path --amp-path --pi-path --token-limit --session-length --refresh-interval --speed --fields --budget --budget-period --token-budget --budget-exit --config --locale --debug-samples --help -h" -- "$cur") )
     return 0
   fi
   COMPREPLY=( $(compgen -W "completion claude codex opencode amp pi daily weekly monthly session summary blocks statusline" -- "$cur") )
@@ -548,13 +594,13 @@ _llmut() {
     '--progress[show progress]' '--no-progress[disable progress]' '--cache[compatibility no-op]' '--offline[compatibility no-op]' '-O[compatibility no-op]'
     '--since[start date]:date:' '--until[end date]:date:' '--timezone[timezone]:timezone:' '-z[timezone]:timezone:'
     '--order[sort order]:order:(asc desc)' '--start-of-week[start of week]:(monday sunday)'
-    '--mode[cost mode]:mode:(auto calculate display)' '--project[project filter]:project:' '-p[project filter]:project:'
+    '--mode[cost mode]:mode:(auto calculate display)' '--by[summary rollup]:by:(model project source)' '--project[project filter]:project:' '-p[project filter]:project:'
     '--id[session id filter]:id:' '--top[row limit]:count:' '--path[source path]:path:_files'
     '--claude-path[Claude projects path]:path:_files' '--codex-path[Codex path]:path:_files'
     '--opencode-path[OpenCode path]:path:_files' '--amp-path[Amp path]:path:_files' '--pi-path[pi-agent path]:path:_files'
     '--token-limit[token warning limit]:tokens:' '--session-length[block length hours]:hours:'
     '--refresh-interval[refresh seconds]:seconds:' '--speed[codex speed]:speed:(auto standard fast)'
-    '--fields[column list]:fields:' '--config[config file]:file:_files' '--locale[compatibility no-op]:locale:'
+    '--fields[column list]:fields:' '--budget[cost budget]:usd:' '--budget-period[budget period]:period:(day week month)' '--token-budget[token budget]:tokens:' '--budget-exit[exit when over budget]' '--config[config file]:file:_files' '--locale[compatibility no-op]:locale:'
     '--debug-samples[compatibility no-op]:count:' '--help[help]' '-h[help]'
   )
   _arguments -C \
@@ -589,6 +635,7 @@ complete -c llmut -l timezone -s z -r -d 'timezone'
 complete -c llmut -l order -a 'asc desc' -d 'sort order'
 complete -c llmut -l start-of-week -a 'monday sunday' -d 'start of week'
 complete -c llmut -l mode -a 'auto calculate display' -d 'cost mode'
+complete -c llmut -l by -a 'model project source' -d 'summary rollup'
 complete -c llmut -l project -s p -r -d 'project filter'
 complete -c llmut -l id -r -d 'session id filter'
 complete -c llmut -l top -r -d 'limit rows'
@@ -603,6 +650,10 @@ complete -c llmut -l session-length -r -d 'block length hours'
 complete -c llmut -l refresh-interval -r -d 'refresh seconds'
 complete -c llmut -l speed -a 'auto standard fast' -d 'codex pricing speed'
 complete -c llmut -l fields -r -d 'column list'
+complete -c llmut -l budget -r -d 'cost budget'
+complete -c llmut -l budget-period -a 'day week month' -d 'budget period'
+complete -c llmut -l token-budget -r -d 'token budget'
+complete -c llmut -l budget-exit -d 'exit when over budget'
 complete -c llmut -l config -r -d 'config file'
 complete -c llmut -l cache -d 'compatibility no-op'
 complete -c llmut -l offline -d 'compatibility no-op'

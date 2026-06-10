@@ -86,3 +86,46 @@ func TestAggregateSummaryDefaultsToTopTen(t *testing.T) {
 		t.Fatalf("first row = %q, want model-11", rows[0].Key)
 	}
 }
+
+func TestAggregateSummaryByProject(t *testing.T) {
+	when := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
+	events := []Event{
+		{Source: SourceClaude, SessionID: "s1", Project: "/work/alpha", Model: "claude-opus-4-8", Time: when, Tokens: Tokens{Input: 100, CostUSD: 2}},
+		{Source: SourceCodex, SessionID: "s2", Project: "/tmp/alpha", Model: "gpt-5.5", Time: when.Add(time.Hour), Tokens: Tokens{Input: 50, CostUSD: 1}},
+		{Source: SourceClaude, SessionID: "s3", Project: "/work/beta", Model: "claude-haiku-4-5-20251001", Time: when, Tokens: Tokens{Input: 20, CostUSD: 5}},
+	}
+
+	rows := aggregate(events, Query{View: "summary", By: "project", Sources: []string{SourceClaude, SourceCodex}, Location: time.UTC, Order: "desc"})
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 project rows, got %d", len(rows))
+	}
+	if rows[0].Key != "beta" || rows[1].Key != "alpha" {
+		t.Fatalf("unexpected project order: %+v", rows)
+	}
+	if rows[1].Input != 150 || rows[1].CostUSD != 3 {
+		t.Fatalf("project alpha was not merged: %+v", rows[1])
+	}
+	if got := rows[1].ModelsUsed; len(got) != 2 || got[0] != "claude-opus-4-8" || got[1] != "gpt-5.5" {
+		t.Fatalf("models = %v, want cost-ranked project models", got)
+	}
+}
+
+func TestAggregateSummaryBySource(t *testing.T) {
+	when := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
+	events := []Event{
+		{Source: SourceClaude, SessionID: "s1", Project: "/work/a", Model: "claude-opus-4-8", Time: when, Tokens: Tokens{Input: 100, CostUSD: 2}},
+		{Source: SourceCodex, SessionID: "s2", Project: "/work/b", Model: "gpt-5.5", Time: when, Tokens: Tokens{Input: 50, CostUSD: 5}},
+		{Source: SourceClaude, SessionID: "s3", Project: "/work/c", Model: "claude-haiku-4-5-20251001", Time: when, Tokens: Tokens{Input: 20, CostUSD: 1}},
+	}
+
+	rows := aggregate(events, Query{View: "summary", By: "source", Sources: []string{SourceClaude, SourceCodex}, Location: time.UTC, Order: "desc"})
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 source rows, got %d", len(rows))
+	}
+	if rows[0].Key != "codex" || rows[1].Key != "claude" {
+		t.Fatalf("unexpected source order: %+v", rows)
+	}
+	if rows[1].Input != 120 || rows[1].CostUSD != 3 {
+		t.Fatalf("source claude was not merged: %+v", rows[1])
+	}
+}
