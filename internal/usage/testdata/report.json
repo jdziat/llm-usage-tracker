@@ -1,0 +1,76 @@
+{
+  "view": "summary",
+  "data": [
+    {
+      "key": "claude-opus-4-8",
+      "source": "claude",
+      "sessionId": "sess-1",
+      "project": "/work/alpha",
+      "start": "2026-06-01T09:00:00Z",
+      "lastActivity": "2026-06-01T17:30:00Z",
+      "modelsUsed": [
+        "claude-opus-4-8"
+      ],
+      "modelBreakdowns": [
+        {
+          "model": "claude-opus-4-8",
+          "inputTokens": 1000,
+          "outputTokens": 2000,
+          "cacheCreationTokens": 300,
+          "cacheReadTokens": 4000,
+          "reasoningTokens": 50,
+          "costUSD": 1.2345
+        }
+      ],
+      "inputTokens": 1000,
+      "outputTokens": 2000,
+      "cacheCreationTokens": 300,
+      "cacheReadTokens": 4000,
+      "reasoningTokens": 50,
+      "costUSD": 1.2345
+    },
+    {
+      "key": "gpt-5.5",
+      "source": "codex",
+      "sessionId": "sess-2",
+      "project": "/work/beta",
+      "start": "2026-06-01T09:00:00Z",
+      "lastActivity": "2026-06-01T17:30:00Z",
+      "modelsUsed": [
+        "gpt-5.5"
+      ],
+      "modelBreakdowns": [
+        {
+          "model": "gpt-5.5",
+          "inputTokens": 500,
+          "outputTokens": 800,
+          "cacheCreationTokens": 0,
+          "cacheReadTokens": 1200,
+          "reasoningTokens": 30,
+          "costUSD": 0.42,
+          "credits": 2.5
+        }
+      ],
+      "inputTokens": 500,
+      "outputTokens": 800,
+      "cacheCreationTokens": 0,
+      "cacheReadTokens": 1200,
+      "reasoningTokens": 30,
+      "costUSD": 0.42,
+      "credits": 2.5
+    }
+  ],
+  "totals": {
+    "inputTokens": 1500,
+    "outputTokens": 2800,
+    "cacheCreationTokens": 300,
+    "cacheReadTokens": 5200,
+    "reasoningTokens": 80,
+    "costUSD": 1.6544999999999999,
+    "credits": 2.5
+  },
+  "warnings": [
+    "claude: could not read /x/bad.jsonl",
+    "codex: malformed session"
+  ]
+}

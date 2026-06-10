@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Golden Report</title>
+<style>
+body{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:32px;background:#f7f8fa;color:#1f2933}
+main{max-width:1200px;margin:0 auto}
+h1{font-size:24px;margin:0 0 6px}
+.meta{color:#64748b;margin:0 0 24px}
+.summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:0 0 24px}
+.metric{background:white;border:1px solid #d9e2ec;border-radius:8px;padding:14px}
+.metric span{display:block;color:#64748b;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+.metric strong{display:block;margin-top:6px;font-size:20px}
+table{width:100%;border-collapse:collapse;background:white;border:1px solid #d9e2ec}
+th,td{padding:10px 12px;border-bottom:1px solid #e5eaf0;text-align:right;white-space:nowrap}
+th:first-child,td:first-child,td:last-child{text-align:left}
+th{background:#eef2f6;color:#334e68;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+tr.breakdown td:first-child{padding-left:28px;color:#52606d}
+.warnings{margin-top:20px;color:#9a3412}
+</style></head><body><main>
+<h1>Golden Report</h1>
+<p class="meta">Generated TIMESTAMP. View: summary.</p>
+<section class="summary">
+<div class="metric"><span>Input</span><strong>1,500</strong></div>
+<div class="metric"><span>Output</span><strong>2,800</strong></div>
+<div class="metric"><span>Cache Read</span><strong>5,200</strong></div>
+<div class="metric"><span>Total Tokens</span><strong>9,800</strong></div>
+<div class="metric"><span>Cost</span><strong>$1.6545</strong></div>
+</section>
+<table><thead><tr><th>Model</th><th>Input</th><th>Output</th><th>Cache Cr.</th><th>Cache Rd.</th><th>Total</th><th>Cost</th><th>Models</th></tr></thead><tbody>
+<tr><td>claude-opus-4-8</td><td>1,000</td><td>2,000</td><td>300</td><td>4,000</td><td>7,300</td><td>$1.2345</td><td>claude-opus-4-8</td></tr>
+<tr class="breakdown"><td>claude-opus-4-8</td><td>1,000</td><td>2,000</td><td>300</td><td>4,000</td><td>7,300</td><td>$1.2345</td><td></td></tr>
+<tr><td>gpt-5.5</td><td>500</td><td>800</td><td>0</td><td>1,200</td><td>2,500</td><td>$0.4200</td><td>gpt-5.5</td></tr>
+<tr class="breakdown"><td>gpt-5.5</td><td>500</td><td>800</td><td>0</td><td>1,200</td><td>2,500</td><td>$0.4200</td><td></td></tr>
+</tbody></table>
+<div class="warnings"><strong>Warnings</strong><ul>
+<li>claude: could not read /x/bad.jsonl</li>
+<li>codex: malformed session</li>
+</ul></div>
+</main></body></html>

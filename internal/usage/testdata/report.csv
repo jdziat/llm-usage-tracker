@@ -1,0 +1,5 @@
+key,source,session_id,project,start,last_activity,input_tokens,output_tokens,cache_creation_tokens,cache_read_tokens,total_tokens,reasoning_tokens,cost_usd,credits,models
+claude-opus-4-8,claude,sess-1,/work/alpha,2026-06-01T09:00:00Z,2026-06-01T17:30:00Z,1000,2000,300,4000,7300,50,1.234500,0.000000,claude-opus-4-8
+"  claude-opus-4-8",claude,sess-1,/work/alpha,2026-06-01T09:00:00Z,2026-06-01T17:30:00Z,1000,2000,300,4000,7300,50,1.234500,0.000000,claude-opus-4-8
+gpt-5.5,codex,sess-2,/work/beta,2026-06-01T09:00:00Z,2026-06-01T17:30:00Z,500,800,0,1200,2500,30,0.420000,2.500000,gpt-5.5
+"  gpt-5.5",codex,sess-2,/work/beta,2026-06-01T09:00:00Z,2026-06-01T17:30:00Z,500,800,0,1200,2500,30,0.420000,2.500000,gpt-5.5
