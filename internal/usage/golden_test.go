@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"testing"
 	"time"
+
+	"github.com/jdziat/llm-usage-tracker/pkg/core"
 )
 
 // updateGolden regenerates the testdata/ golden files instead of comparing.
@@ -21,10 +23,10 @@ var updateGolden = flag.Bool("update", false, "update golden files in testdata/"
 // the pkg/core refactor (P0): if any renderer's bytes change, the matching
 // golden test fails. When the data types move to pkg/core, update the type
 // references here in lockstep but keep the golden files byte-identical.
-func goldenFixture() (Config, []Row, []string) {
+func goldenFixture() (core.Query, RenderOptions, core.Result) {
 	t0 := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
 	t1 := time.Date(2026, 6, 1, 17, 30, 0, 0, time.UTC)
-	rows := []Row{
+	rows := []core.Row{
 		{
 			Key:          "claude-opus-4-8",
 			Source:       "claude",
@@ -33,9 +35,9 @@ func goldenFixture() (Config, []Row, []string) {
 			Start:        t0,
 			LastActivity: t1,
 			ModelsUsed:   []string{"claude-opus-4-8"},
-			Tokens:       Tokens{Input: 1000, Output: 2000, CacheCreation: 300, CacheRead: 4000, Reasoning: 50, CostUSD: 1.2345},
-			ModelBreakdowns: []ModelBreakdown{
-				{Model: "claude-opus-4-8", Tokens: Tokens{Input: 1000, Output: 2000, CacheCreation: 300, CacheRead: 4000, Reasoning: 50, CostUSD: 1.2345}},
+			Tokens:       core.Tokens{Input: 1000, Output: 2000, CacheCreation: 300, CacheRead: 4000, Reasoning: 50, CostUSD: 1.2345},
+			ModelBreakdowns: []core.ModelBreakdown{
+				{Model: "claude-opus-4-8", Tokens: core.Tokens{Input: 1000, Output: 2000, CacheCreation: 300, CacheRead: 4000, Reasoning: 50, CostUSD: 1.2345}},
 			},
 		},
 		{
@@ -46,15 +48,23 @@ func goldenFixture() (Config, []Row, []string) {
 			Start:        t0,
 			LastActivity: t1,
 			ModelsUsed:   []string{"gpt-5.5"},
-			Tokens:       Tokens{Input: 500, Output: 800, CacheRead: 1200, Reasoning: 30, CostUSD: 0.42, Credits: 2.5},
-			ModelBreakdowns: []ModelBreakdown{
-				{Model: "gpt-5.5", Tokens: Tokens{Input: 500, Output: 800, CacheRead: 1200, Reasoning: 30, CostUSD: 0.42, Credits: 2.5}},
+			Tokens:       core.Tokens{Input: 500, Output: 800, CacheRead: 1200, Reasoning: 30, CostUSD: 0.42, Credits: 2.5},
+			ModelBreakdowns: []core.ModelBreakdown{
+				{Model: "gpt-5.5", Tokens: core.Tokens{Input: 500, Output: 800, CacheRead: 1200, Reasoning: 30, CostUSD: 0.42, Credits: 2.5}},
 			},
 		},
 	}
-	cfg := Config{View: "summary", Breakdown: true}
-	warnings := []string{"claude: could not read /x/bad.jsonl", "codex: malformed session"}
-	return cfg, rows, warnings
+	q := core.Query{View: "summary"}
+	opts := RenderOptions{Breakdown: true}
+	res := core.Result{
+		View:     q.View,
+		Rows:     rows,
+		Warnings: []core.Warning{{Source: "claude", Message: "could not read /x/bad.jsonl"}, {Source: "codex", Message: "malformed session"}},
+	}
+	for _, row := range rows {
+		res.Totals.Add(row.Tokens)
+	}
+	return q, opts, res
 }
 
 // htmlGeneratedLine matches the non-deterministic "Generated <RFC3339>." line
@@ -83,27 +93,27 @@ func assertGolden(t *testing.T, name string, got []byte) {
 }
 
 func TestGoldenJSON(t *testing.T) {
-	cfg, rows, warnings := goldenFixture()
+	_, _, res := goldenFixture()
 	var buf bytes.Buffer
-	if err := writeJSON(&buf, cfg, rows, warnings); err != nil {
+	if err := writeJSON(&buf, res); err != nil {
 		t.Fatal(err)
 	}
 	assertGolden(t, "report.json", buf.Bytes())
 }
 
 func TestGoldenCSV(t *testing.T) {
-	cfg, rows, _ := goldenFixture()
+	_, opts, res := goldenFixture()
 	var buf bytes.Buffer
-	if err := writeCSV(&buf, cfg, rows); err != nil {
+	if err := writeCSV(&buf, opts, res.Rows); err != nil {
 		t.Fatal(err)
 	}
 	assertGolden(t, "report.csv", buf.Bytes())
 }
 
 func TestGoldenHTML(t *testing.T) {
-	cfg, rows, warnings := goldenFixture()
+	q, opts, res := goldenFixture()
 	var buf bytes.Buffer
-	if err := writeHTML(&buf, "Golden Report", cfg, rows, warnings); err != nil {
+	if err := writeHTML(&buf, "Golden Report", q, opts, res); err != nil {
 		t.Fatal(err)
 	}
 	normalized := htmlGeneratedLine.ReplaceAll(buf.Bytes(), []byte("Generated TIMESTAMP. View"))

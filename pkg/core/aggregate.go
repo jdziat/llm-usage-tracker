@@ -1,4 +1,4 @@
-package usage
+package core
 
 import (
 	"fmt"
@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func aggregate(events []Event, cfg Config) []Row {
+func aggregate(events []Event, cfg Query) []Row {
 	filtered := filterEvents(events, cfg)
 	switch cfg.View {
 	case "session":
@@ -31,13 +31,13 @@ func aggregate(events []Event, cfg Config) []Row {
 	}
 }
 
-func aggregateSummary(events []Event, cfg Config) []Row {
+func aggregateSummary(events []Event, cfg Query) []Row {
 	rows := map[string]*Row{}
 	for _, ev := range events {
 		model := firstNonEmpty(ev.Model, "unknown")
 		key := model
 		if len(cfg.Sources) != 1 {
-			key = sourceLabel(ev.Source) + ":" + model
+			key = SourceLabel(ev.Source) + ":" + model
 		}
 		row := rows[key]
 		if row == nil {
@@ -63,7 +63,7 @@ func aggregateSummary(events []Event, cfg Config) []Row {
 	return out
 }
 
-func filterEvents(events []Event, cfg Config) []Event {
+func filterEvents(events []Event, cfg Query) []Event {
 	var out []Event
 	for _, ev := range events {
 		when := ev.Time
@@ -88,7 +88,7 @@ func filterEvents(events []Event, cfg Config) []Event {
 	return out
 }
 
-func aggregateByKey(events []Event, cfg Config, keyFn func(time.Time, *time.Location) string) []Row {
+func aggregateByKey(events []Event, cfg Query, keyFn func(time.Time, *time.Location) string) []Row {
 	rows := map[string]*Row{}
 	for _, ev := range events {
 		key := keyFn(ev.Time, cfg.Location)
@@ -96,7 +96,7 @@ func aggregateByKey(events []Event, cfg Config, keyFn func(time.Time, *time.Loca
 			key += " " + compactProject(ev.Project)
 		}
 		if len(cfg.Sources) != 1 {
-			key += " " + sourceLabel(ev.Source)
+			key += " " + SourceLabel(ev.Source)
 		}
 		row := rows[key]
 		if row == nil {
@@ -108,12 +108,12 @@ func aggregateByKey(events []Event, cfg Config, keyFn func(time.Time, *time.Loca
 	return sortedRows(rows, cfg.Order)
 }
 
-func aggregateSessions(events []Event, cfg Config) []Row {
+func aggregateSessions(events []Event, cfg Query) []Row {
 	rows := map[string]*Row{}
 	for _, ev := range events {
 		key := ev.SessionID
 		if len(cfg.Sources) != 1 {
-			key = sourceLabel(ev.Source) + ":" + key
+			key = SourceLabel(ev.Source) + ":" + key
 		}
 		row := rows[key]
 		if row == nil {
@@ -134,7 +134,7 @@ func aggregateSessions(events []Event, cfg Config) []Row {
 	return sortedRows(rows, cfg.Order)
 }
 
-func aggregateBlocks(events []Event, cfg Config) []Row {
+func aggregateBlocks(events []Event, cfg Query) []Row {
 	if cfg.SessionLength == 0 {
 		cfg.SessionLength = 5 * time.Hour
 	}
@@ -266,9 +266,9 @@ func fmtKey(format string, args ...any) string {
 	return fmt.Sprintf(format, args...)
 }
 
-func sourceForRow(cfg Config, source string) string {
+func sourceForRow(cfg Query, source string) string {
 	if len(cfg.Sources) == 1 {
-		return sourceLabel(source)
+		return SourceLabel(source)
 	}
 	return ""
 }

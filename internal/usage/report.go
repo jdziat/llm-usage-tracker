@@ -8,35 +8,65 @@ import (
 	"io"
 	"strings"
 	"time"
+
+	"github.com/jdziat/llm-usage-tracker/pkg/core"
 )
 
-type jsonReport struct {
-	View     string   `json:"view"`
-	Rows     []Row    `json:"data"`
-	Totals   Tokens   `json:"totals"`
-	Warnings []string `json:"warnings,omitempty"`
+type RenderOptions struct {
+	Format     string
+	OutputPath string
+	Breakdown  bool
+	Compact    bool
+	TokenLimit int64
+	Debug      bool
+
+	progress        bool
+	refreshInterval time.Duration
 }
 
-func writeJSON(w io.Writer, cfg Config, rows []Row, warnings []string) error {
-	report := jsonReport{View: cfg.View, Rows: rows, Warnings: warnings}
-	for _, r := range rows {
-		report.Totals.Add(r.Tokens)
+func Render(w io.Writer, res core.Result, q core.Query, opts RenderOptions) error {
+	switch opts.Format {
+	case "json":
+		return writeJSON(w, res)
+	case "csv":
+		return writeCSV(w, opts, res.Rows)
+	case "html":
+		return writeHTML(w, title(q), q, opts, res)
 	}
+	renderReport(w, res, q, opts)
+	return nil
+}
+
+func writeJSON(w io.Writer, res core.Result) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	return enc.Encode(report)
+	return enc.Encode(res)
 }
 
-func writeTable(w io.Writer, title string, rows []Row, cfg Config) {
+func renderReport(out io.Writer, res core.Result, q core.Query, opts RenderOptions) {
+	if q.View == "blocks" && opts.Compact {
+		writeStatusline(out, res.Rows, q, opts)
+		return
+	}
+	if len(res.Rows) == 0 {
+		fmt.Fprintln(out, "No usage data found.")
+		return
+	}
+	if opts.Format == "pretty" {
+		writePrettyTable(out, title(q), res, q, opts)
+		return
+	}
+	writeTable(out, title(q), res, q, opts)
+}
+
+func writeTable(w io.Writer, title string, res core.Result, q core.Query, opts RenderOptions) {
 	fmt.Fprintln(w, title)
 	fmt.Fprintln(w, strings.Repeat("-", len(title)))
-	headers := []string{keyHeader(cfg), "Input", "Output", "Cache Cr.", "Cache Rd.", "Total", "Cost", "Models"}
-	widths := reportWidths(cfg)
+	headers := []string{keyHeader(q), "Input", "Output", "Cache Cr.", "Cache Rd.", "Total", "Cost", "Models"}
+	widths := reportWidths(q, opts)
 	printRow(w, widths, headers)
 	printSep(w, widths)
-	total := Tokens{}
-	for _, row := range rows {
-		total.Add(row.Tokens)
+	for _, row := range res.Rows {
 		printRow(w, widths, []string{
 			row.Key,
 			formatInt(row.Input),
@@ -47,7 +77,7 @@ func writeTable(w io.Writer, title string, rows []Row, cfg Config) {
 			formatCost(row.CostUSD),
 			truncate(strings.Join(row.ModelsUsed, ","), widths[7]),
 		})
-		if cfg.Breakdown {
+		if opts.Breakdown {
 			for _, b := range row.ModelBreakdowns {
 				printRow(w, widths, []string{
 					"  " + truncate(b.Model, widths[0]-2),
@@ -63,19 +93,17 @@ func writeTable(w io.Writer, title string, rows []Row, cfg Config) {
 		}
 	}
 	printSep(w, widths)
-	printRow(w, widths, []string{"Total", formatInt(total.Input), formatInt(total.Output), formatInt(total.CacheCreation), formatInt(total.CacheRead), formatInt(total.Total()), formatCost(total.CostUSD), ""})
+	printRow(w, widths, []string{"Total", formatInt(res.Totals.Input), formatInt(res.Totals.Output), formatInt(res.Totals.CacheCreation), formatInt(res.Totals.CacheRead), formatInt(res.Totals.Total()), formatCost(res.Totals.CostUSD), ""})
 }
 
-func writePrettyTable(w io.Writer, title string, rows []Row, cfg Config) {
+func writePrettyTable(w io.Writer, title string, res core.Result, q core.Query, opts RenderOptions) {
 	fmt.Fprintln(w, title)
-	widths := reportWidths(cfg)
-	headers := []string{keyHeader(cfg), "Input", "Output", "Cache Cr.", "Cache Rd.", "Total", "Cost", "Models"}
+	widths := reportWidths(q, opts)
+	headers := []string{keyHeader(q), "Input", "Output", "Cache Cr.", "Cache Rd.", "Total", "Cost", "Models"}
 	printBoxBorder(w, widths, "top")
 	printBoxRow(w, widths, headers)
 	printBoxBorder(w, widths, "mid")
-	total := Tokens{}
-	for _, row := range rows {
-		total.Add(row.Tokens)
+	for _, row := range res.Rows {
 		printBoxRow(w, widths, []string{
 			row.Key,
 			formatInt(row.Input),
@@ -86,7 +114,7 @@ func writePrettyTable(w io.Writer, title string, rows []Row, cfg Config) {
 			formatCost(row.CostUSD),
 			truncate(strings.Join(row.ModelsUsed, ","), widths[7]),
 		})
-		if cfg.Breakdown {
+		if opts.Breakdown {
 			for _, b := range row.ModelBreakdowns {
 				printBoxRow(w, widths, []string{
 					"  " + truncate(b.Model, widths[0]-2),
@@ -102,11 +130,11 @@ func writePrettyTable(w io.Writer, title string, rows []Row, cfg Config) {
 		}
 	}
 	printBoxBorder(w, widths, "mid")
-	printBoxRow(w, widths, []string{"Total", formatInt(total.Input), formatInt(total.Output), formatInt(total.CacheCreation), formatInt(total.CacheRead), formatInt(total.Total()), formatCost(total.CostUSD), ""})
+	printBoxRow(w, widths, []string{"Total", formatInt(res.Totals.Input), formatInt(res.Totals.Output), formatInt(res.Totals.CacheCreation), formatInt(res.Totals.CacheRead), formatInt(res.Totals.Total()), formatCost(res.Totals.CostUSD), ""})
 	printBoxBorder(w, widths, "bottom")
 }
 
-func writeCSV(w io.Writer, cfg Config, rows []Row) error {
+func writeCSV(w io.Writer, opts RenderOptions, rows []core.Row) error {
 	cw := csv.NewWriter(w)
 	header := []string{"key", "source", "session_id", "project", "start", "last_activity", "input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens", "total_tokens", "reasoning_tokens", "cost_usd", "credits", "models"}
 	if err := cw.Write(header); err != nil {
@@ -116,7 +144,7 @@ func writeCSV(w io.Writer, cfg Config, rows []Row) error {
 		if err := cw.Write(csvRow(row)); err != nil {
 			return err
 		}
-		if cfg.Breakdown {
+		if opts.Breakdown {
 			for _, b := range row.ModelBreakdowns {
 				breakdown := row
 				breakdown.Key = "  " + b.Model
@@ -132,11 +160,7 @@ func writeCSV(w io.Writer, cfg Config, rows []Row) error {
 	return cw.Error()
 }
 
-func writeHTML(w io.Writer, title string, cfg Config, rows []Row, warnings []string) error {
-	total := Tokens{}
-	for _, r := range rows {
-		total.Add(r.Tokens)
-	}
+func writeHTML(w io.Writer, title string, q core.Query, opts RenderOptions, res core.Result) error {
 	fmt.Fprintln(w, "<!doctype html>")
 	fmt.Fprintln(w, `<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">`)
 	fmt.Fprintf(w, "<title>%s</title>\n", html.EscapeString(title))
@@ -157,18 +181,18 @@ tr.breakdown td:first-child{padding-left:28px;color:#52606d}
 .warnings{margin-top:20px;color:#9a3412}
 </style></head><body><main>`)
 	fmt.Fprintf(w, "<h1>%s</h1>\n", html.EscapeString(title))
-	fmt.Fprintf(w, `<p class="meta">Generated %s. View: %s.</p>`+"\n", html.EscapeString(time.Now().Format(time.RFC3339)), html.EscapeString(cfg.View))
+	fmt.Fprintf(w, `<p class="meta">Generated %s. View: %s.</p>`+"\n", html.EscapeString(time.Now().Format(time.RFC3339)), html.EscapeString(q.View))
 	fmt.Fprintln(w, `<section class="summary">`)
-	htmlMetric(w, "Input", formatInt(total.Input))
-	htmlMetric(w, "Output", formatInt(total.Output))
-	htmlMetric(w, "Cache Read", formatInt(total.CacheRead))
-	htmlMetric(w, "Total Tokens", formatInt(total.Total()))
-	htmlMetric(w, "Cost", formatCost(total.CostUSD))
+	htmlMetric(w, "Input", formatInt(res.Totals.Input))
+	htmlMetric(w, "Output", formatInt(res.Totals.Output))
+	htmlMetric(w, "Cache Read", formatInt(res.Totals.CacheRead))
+	htmlMetric(w, "Total Tokens", formatInt(res.Totals.Total()))
+	htmlMetric(w, "Cost", formatCost(res.Totals.CostUSD))
 	fmt.Fprintln(w, `</section>`)
-	fmt.Fprintln(w, `<table><thead><tr><th>`+html.EscapeString(keyHeader(cfg))+`</th><th>Input</th><th>Output</th><th>Cache Cr.</th><th>Cache Rd.</th><th>Total</th><th>Cost</th><th>Models</th></tr></thead><tbody>`)
-	for _, row := range rows {
+	fmt.Fprintln(w, `<table><thead><tr><th>`+html.EscapeString(keyHeader(q))+`</th><th>Input</th><th>Output</th><th>Cache Cr.</th><th>Cache Rd.</th><th>Total</th><th>Cost</th><th>Models</th></tr></thead><tbody>`)
+	for _, row := range res.Rows {
 		writeHTMLRow(w, row, "")
-		if cfg.Breakdown {
+		if opts.Breakdown {
 			for _, b := range row.ModelBreakdowns {
 				breakdown := row
 				breakdown.Key = b.Model
@@ -179,10 +203,10 @@ tr.breakdown td:first-child{padding-left:28px;color:#52606d}
 		}
 	}
 	fmt.Fprintln(w, `</tbody></table>`)
-	if len(warnings) > 0 {
+	if len(res.Warnings) > 0 {
 		fmt.Fprintln(w, `<div class="warnings"><strong>Warnings</strong><ul>`)
-		for _, warning := range warnings {
-			fmt.Fprintf(w, "<li>%s</li>\n", html.EscapeString(warning))
+		for _, warning := range res.Warnings {
+			fmt.Fprintf(w, "<li>%s</li>\n", html.EscapeString(warningString(warning)))
 		}
 		fmt.Fprintln(w, `</ul></div>`)
 	}
@@ -190,20 +214,20 @@ tr.breakdown td:first-child{padding-left:28px;color:#52606d}
 	return nil
 }
 
-func writeStatusline(w io.Writer, rows []Row, cfg Config) {
+func writeStatusline(w io.Writer, rows []core.Row, q core.Query, opts RenderOptions) {
 	if len(rows) == 0 {
 		fmt.Fprintln(w, "Claude: no active usage")
 		return
 	}
 	r := rows[0]
-	end := r.Start.Add(cfg.SessionLength)
+	end := r.Start.Add(q.SessionLength)
 	remaining := time.Until(end)
 	if remaining < 0 {
 		remaining = 0
 	}
 	limit := ""
-	if cfg.TokenLimit > 0 {
-		limit = fmt.Sprintf(" %.0f%%", float64(r.Total())/float64(cfg.TokenLimit)*100)
+	if opts.TokenLimit > 0 {
+		limit = fmt.Sprintf(" %.0f%%", float64(r.Total())/float64(opts.TokenLimit)*100)
 	}
 	fmt.Fprintf(w, "Claude %s tokens %s %s left%s\n", formatInt(r.Total()), formatCost(r.CostUSD), remaining.Round(time.Minute), limit)
 }
@@ -257,7 +281,7 @@ func printBoxRow(w io.Writer, widths []int, cols []string) {
 	fmt.Fprintln(w)
 }
 
-func csvRow(row Row) []string {
+func csvRow(row core.Row) []string {
 	return []string{
 		row.Key,
 		row.Source,
@@ -277,7 +301,7 @@ func csvRow(row Row) []string {
 	}
 }
 
-func writeHTMLRow(w io.Writer, row Row, class string) {
+func writeHTMLRow(w io.Writer, row core.Row, class string) {
 	fmt.Fprintf(w, "<tr%s>", class)
 	fmt.Fprintf(w, "<td>%s</td>", html.EscapeString(row.Key))
 	fmt.Fprintf(w, "<td>%s</td>", html.EscapeString(formatInt(row.Input)))
@@ -294,8 +318,8 @@ func htmlMetric(w io.Writer, label, value string) {
 	fmt.Fprintf(w, `<div class="metric"><span>%s</span><strong>%s</strong></div>`+"\n", html.EscapeString(label), html.EscapeString(value))
 }
 
-func keyHeader(cfg Config) string {
-	switch cfg.View {
+func keyHeader(q core.Query) string {
+	switch q.View {
 	case "weekly":
 		return "Week"
 	case "monthly":
@@ -311,31 +335,31 @@ func keyHeader(cfg Config) string {
 	}
 }
 
-func minWidth(cfg Config) int {
-	if cfg.Breakdown {
+func minWidth(q core.Query, opts RenderOptions) int {
+	if opts.Breakdown {
 		return 34
 	}
-	if cfg.View == "summary" {
+	if q.View == "summary" {
 		return 30
 	}
-	if cfg.View == "session" {
+	if q.View == "session" {
 		return 30
 	}
-	if cfg.View == "blocks" {
+	if q.View == "blocks" {
 		return 16
 	}
 	return 18
 }
 
-func modelWidth(cfg Config) int {
-	if cfg.Breakdown {
+func modelWidth(opts RenderOptions) int {
+	if opts.Breakdown {
 		return 34
 	}
 	return 30
 }
 
-func reportWidths(cfg Config) []int {
-	return []int{minWidth(cfg), 15, 12, 12, 15, 15, 11, modelWidth(cfg)}
+func reportWidths(q core.Query, opts RenderOptions) []int {
+	return []int{minWidth(q, opts), 15, 12, 12, 15, 15, 11, modelWidth(opts)}
 }
 
 func formatCost(f float64) string {

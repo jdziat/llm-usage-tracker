@@ -1,4 +1,4 @@
-package usage
+package core
 
 import (
 	"encoding/json"
@@ -110,7 +110,7 @@ func basenameSession(path string) string {
 	return name
 }
 
-func sourceLabel(s string) string {
+func SourceLabel(s string) string {
 	if s == SourcePI {
 		return "pi-agent"
 	}

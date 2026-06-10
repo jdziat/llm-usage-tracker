@@ -20,25 +20,25 @@ func TestParseArgsAllowsFlagsBeforePositionals(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg, err := parseArgs(tc.args)
+			q, _, _, err := parseArgs(tc.args)
 			if err != nil {
 				t.Fatalf("parseArgs(%v) returned error: %v", tc.args, err)
 			}
-			if !cfg.Since.Equal(want) {
-				t.Fatalf("parseArgs(%v) Since = %v, want %v", tc.args, cfg.Since, want)
+			if !q.Since.Equal(want) {
+				t.Fatalf("parseArgs(%v) Since = %v, want %v", tc.args, q.Since, want)
 			}
 		})
 	}
 }
 
 func TestParseArgsRejectsSourceAfterView(t *testing.T) {
-	if _, err := parseArgs([]string{"daily", "claude"}); err == nil {
+	if _, _, _, err := parseArgs([]string{"daily", "claude"}); err == nil {
 		t.Fatal("expected error for source after view, got nil")
 	}
 }
 
 func TestParseArgsRejectsUnknownPositional(t *testing.T) {
-	if _, err := parseArgs([]string{"daily", "bogus"}); err == nil {
+	if _, _, _, err := parseArgs([]string{"daily", "bogus"}); err == nil {
 		t.Fatal("expected error for unknown positional, got nil")
 	}
 }

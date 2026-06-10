@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"io"
 	"time"
+
+	"github.com/jdziat/llm-usage-tracker/pkg/core"
 )
 
 const terminalClear = "\033[H\033[2J"
 
-func runLive(cfg Config, out, stderr io.Writer, stop <-chan struct{}) error {
-	interval := cfg.RefreshInterval
+func runLive(q core.Query, opts RenderOptions, out, stderr io.Writer, stop <-chan struct{}) error {
+	interval := opts.refreshInterval
 	if interval <= 0 {
 		interval = 5 * time.Second
 	}
@@ -20,18 +22,17 @@ func runLive(cfg Config, out, stderr io.Writer, stop <-chan struct{}) error {
 		default:
 		}
 
-		events, warnings, err := loadEvents(cfg)
+		res, err := core.LoadAndAggregate(q, nil)
 		if err != nil {
 			return err
 		}
-		for _, w := range warnings {
-			if cfg.Debug {
-				fmt.Fprintln(stderr, "warning:", w)
+		for _, w := range res.Warnings {
+			if opts.Debug {
+				fmt.Fprintln(stderr, "warning:", warningString(w))
 			}
 		}
-		rows := aggregate(events, cfg)
 		fmt.Fprint(out, terminalClear)
-		renderReport(out, cfg, rows)
+		renderReport(out, res, q, opts)
 
 		timer := time.NewTimer(interval)
 		select {

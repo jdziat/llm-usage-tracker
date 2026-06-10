@@ -1,4 +1,4 @@
-package usage
+package core
 
 import "time"
 
@@ -11,6 +11,10 @@ const (
 )
 
 var allSources = []string{SourceClaude, SourceCodex, SourceOpenCode, SourceAmp, SourcePI}
+
+func AllSources() []string {
+	return append([]string(nil), allSources...)
+}
 
 type Tokens struct {
 	Input         int64   `json:"inputTokens"`
@@ -63,35 +67,4 @@ type Row struct {
 	ModelsUsed      []string         `json:"modelsUsed"`
 	ModelBreakdowns []ModelBreakdown `json:"modelBreakdowns,omitempty"`
 	Tokens
-}
-
-type Config struct {
-	View            string
-	Sources         []string
-	Since           time.Time
-	Until           time.Time
-	Location        *time.Location
-	JSON            bool
-	Format          string
-	OutputPath      string
-	Breakdown       bool
-	Instances       bool
-	Active          bool
-	Recent          bool
-	Compact         bool
-	Debug           bool
-	Live            bool
-	Progress        bool
-	Order           string
-	StartOfWeek     string
-	Mode            string
-	Project         string
-	ID              string
-	Top             int
-	TokenLimit      int64
-	SessionLength   time.Duration
-	RefreshInterval time.Duration
-	SourcePaths     map[string][]string
-	Speed           string
-	progress        *progressIndicator
 }

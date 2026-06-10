@@ -1,4 +1,4 @@
-package usage
+package core
 
 import (
 	"fmt"
@@ -16,7 +16,7 @@ func TestAggregateRanksModelsByCostThenTokens(t *testing.T) {
 		events[i].Tokens.CostUSD = calculateCost(events[i].Model, events[i].Tokens, "standard")
 	}
 
-	rows := aggregate(events, Config{View: "daily", Sources: []string{SourceClaude}, Location: time.UTC, Order: "asc"})
+	rows := aggregate(events, Query{View: "daily", Sources: []string{SourceClaude}, Location: time.UTC, Order: "asc"})
 	if len(rows) != 1 {
 		t.Fatalf("expected one row, got %d", len(rows))
 	}
@@ -39,7 +39,7 @@ func TestAggregateSummaryReturnsTopModelsByCost(t *testing.T) {
 		{Source: SourceCodex, SessionID: "s3", Project: "/work/mid", Model: "gpt-5.5", Time: when, Tokens: Tokens{Input: 100, CostUSD: 5}},
 	}
 
-	rows := aggregate(events, Config{View: "summary", Sources: []string{SourceClaude, SourceCodex}, Location: time.UTC, Order: "desc", Top: 2})
+	rows := aggregate(events, Query{View: "summary", Sources: []string{SourceClaude, SourceCodex}, Location: time.UTC, Order: "desc", Top: 2})
 	if len(rows) != 2 {
 		t.Fatalf("expected 2 summary rows, got %d", len(rows))
 	}
@@ -55,7 +55,7 @@ func TestAggregateSummaryMergesProjectsPerModel(t *testing.T) {
 		{Source: SourceClaude, SessionID: "s2", Project: "/work/b", Model: "claude-opus-4-8", Time: when.Add(time.Hour), Tokens: Tokens{Input: 50, CostUSD: 1}},
 	}
 
-	rows := aggregate(events, Config{View: "summary", Sources: []string{SourceClaude}, Location: time.UTC, Order: "desc"})
+	rows := aggregate(events, Query{View: "summary", Sources: []string{SourceClaude}, Location: time.UTC, Order: "desc"})
 	if len(rows) != 1 {
 		t.Fatalf("expected one row per model, got %d", len(rows))
 	}
@@ -78,7 +78,7 @@ func TestAggregateSummaryDefaultsToTopTen(t *testing.T) {
 		})
 	}
 
-	rows := aggregate(events, Config{View: "summary", Sources: []string{SourceClaude}, Location: time.UTC, Order: "desc"})
+	rows := aggregate(events, Query{View: "summary", Sources: []string{SourceClaude}, Location: time.UTC, Order: "desc"})
 	if len(rows) != 10 {
 		t.Fatalf("expected default top 10, got %d", len(rows))
 	}

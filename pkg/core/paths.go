@@ -1,4 +1,4 @@
-package usage
+package core
 
 import (
 	"os"
@@ -6,32 +6,32 @@ import (
 	"strings"
 )
 
-func defaultSourcePaths(source string) []string {
+func DefaultSourcePaths(source string) []string {
 	home, _ := os.UserHomeDir()
 	switch source {
 	case SourceClaude:
 		if v := os.Getenv("CLAUDE_CONFIG_DIR"); v != "" {
-			return expandList(v, "projects")
+			return ExpandList(v, "projects")
 		}
 		return existing(filepath.Join(home, ".config", "claude", "projects"), filepath.Join(home, ".claude", "projects"))
 	case SourceCodex:
 		if v := os.Getenv("CODEX_HOME"); v != "" {
-			return expandList(v, "sessions")
+			return ExpandList(v, "sessions")
 		}
 		return existing(filepath.Join(home, ".codex", "sessions"))
 	case SourceOpenCode:
 		if v := os.Getenv("OPENCODE_DATA_DIR"); v != "" {
-			return expandList(v, "")
+			return ExpandList(v, "")
 		}
 		return existing(filepath.Join(home, ".local", "share", "opencode"))
 	case SourceAmp:
 		if v := os.Getenv("AMP_DATA_DIR"); v != "" {
-			return expandList(v, "")
+			return ExpandList(v, "")
 		}
 		return existing(filepath.Join(home, ".local", "share", "amp"))
 	case SourcePI:
 		if v := os.Getenv("PI_AGENT_DIR"); v != "" {
-			return expandList(v, "")
+			return ExpandList(v, "")
 		}
 		return existing(filepath.Join(home, ".pi", "agent", "sessions"))
 	default:
@@ -49,7 +49,7 @@ func existing(paths ...string) []string {
 	return out
 }
 
-func expandList(v, appendDir string) []string {
+func ExpandList(v, appendDir string) []string {
 	home, _ := os.UserHomeDir()
 	var out []string
 	for _, part := range strings.Split(v, ",") {
@@ -102,4 +102,18 @@ func discoverFiles(roots []string, want func(string) bool) ([]string, error) {
 		}
 	}
 	return files, nil
+}
+
+func DetectCodexSpeed() string {
+	for _, root := range DefaultSourcePaths(SourceCodex) {
+		config := strings.TrimSuffix(root, "/sessions") + "/config.toml"
+		b, err := os.ReadFile(config)
+		if err == nil {
+			s := strings.ToLower(string(b))
+			if strings.Contains(s, `service_tier = "priority"`) || strings.Contains(s, `service_tier = "fast"`) {
+				return "fast"
+			}
+		}
+	}
+	return "standard"
 }

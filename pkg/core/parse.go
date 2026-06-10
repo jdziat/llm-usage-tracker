@@ -1,4 +1,4 @@
-package usage
+package core
 
 import (
 	"bufio"
@@ -11,58 +11,12 @@ import (
 	"time"
 )
 
-func loadEvents(cfg Config) ([]Event, []string, error) {
-	var events []Event
-	var warnings []string
-	for _, source := range cfg.Sources {
-		paths := cfg.SourcePaths[source]
-		if len(paths) == 0 {
-			paths = defaultSourcePaths(source)
-		}
-		if cfg.progress != nil {
-			cfg.progress.Set("Scanning " + sourceLabel(source) + ": discovering files")
-		}
-		var got []Event
-		var err error
-		switch source {
-		case SourceClaude:
-			got, err = readClaude(paths, cfg)
-		case SourceCodex:
-			got, err = readCodex(paths, cfg)
-		default:
-			got, err = readGenericSource(source, paths, cfg)
-		}
-		if err != nil {
-			warnings = append(warnings, source+": "+err.Error())
-			continue
-		}
-		if cfg.progress != nil {
-			cfg.progress.Done(fmt.Sprintf("Scanned %s: %d events", sourceLabel(source), len(got)))
-		}
-		events = append(events, got...)
-	}
-	if cfg.progress != nil {
-		cfg.progress.Set(fmt.Sprintf("Calculating costs for %d events", len(events)))
-	}
-	for i := range events {
-		if events[i].Tokens.CostUSD == 0 || cfg.Mode == "calculate" || (cfg.Mode == "auto" && !events[i].RawCostKnown) {
-			events[i].Tokens.CostUSD = calculateCost(events[i].Model, events[i].Tokens, cfg.Speed)
-		}
-	}
-	if cfg.progress != nil {
-		cfg.progress.Done(fmt.Sprintf("Calculated costs for %d events", len(events)))
-	}
-	return events, warnings, nil
-}
-
-func readClaude(roots []string, cfg Config) ([]Event, error) {
+func readClaude(roots []string, cfg Query, onProgress Progress) ([]Event, error) {
 	files, err := discoverFiles(roots, func(p string) bool { return strings.HasSuffix(p, ".jsonl") })
 	if err != nil {
 		return nil, err
 	}
-	if cfg.progress != nil {
-		cfg.progress.Set(fmt.Sprintf("Scanning Claude: 0/%d files", len(files)))
-	}
+	progress(onProgress, fmt.Sprintf("Scanning Claude: 0/%d files", len(files)))
 	var out []Event
 	seen := map[string]bool{}
 	for i, file := range files {
@@ -111,25 +65,21 @@ func readClaude(roots []string, cfg Config) ([]Event, error) {
 				RawCostKnown: tok.CostUSD > 0,
 			}, true
 		})
-		if err != nil && cfg.Debug {
+		if err != nil && cfg.Tolerant {
 			continue
 		}
 		out = append(out, events...)
-		if cfg.progress != nil {
-			cfg.progress.Set(fmt.Sprintf("Scanning Claude: %d/%d files, %d events", i+1, len(files), len(out)))
-		}
+		progress(onProgress, fmt.Sprintf("Scanning Claude: %d/%d files, %d events", i+1, len(files), len(out)))
 	}
 	return out, nil
 }
 
-func readCodex(roots []string, cfg Config) ([]Event, error) {
+func readCodex(roots []string, cfg Query, onProgress Progress) ([]Event, error) {
 	files, err := discoverFiles(roots, func(p string) bool { return strings.HasSuffix(p, ".jsonl") })
 	if err != nil {
 		return nil, err
 	}
-	if cfg.progress != nil {
-		cfg.progress.Set(fmt.Sprintf("Scanning Codex: 0/%d files", len(files)))
-	}
+	progress(onProgress, fmt.Sprintf("Scanning Codex: 0/%d files", len(files)))
 	var out []Event
 	for i, file := range files {
 		sessionID := basenameSession(file)
@@ -177,13 +127,11 @@ func readCodex(roots []string, cfg Config) ([]Event, error) {
 				return Event{}, false
 			}
 		})
-		if err != nil && cfg.Debug {
+		if err != nil && cfg.Tolerant {
 			continue
 		}
 		out = append(out, events...)
-		if cfg.progress != nil {
-			cfg.progress.Set(fmt.Sprintf("Scanning Codex: %d/%d files, %d events", i+1, len(files), len(out)))
-		}
+		progress(onProgress, fmt.Sprintf("Scanning Codex: %d/%d files, %d events", i+1, len(files), len(out)))
 	}
 	return out, nil
 }
@@ -215,16 +163,14 @@ func makeCodexEvent(file, sessionID, project, model string, when time.Time, tok 
 	}
 }
 
-func readGenericSource(source string, roots []string, cfg Config) ([]Event, error) {
+func readGenericSource(source string, roots []string, cfg Query, onProgress Progress) ([]Event, error) {
 	files, err := discoverFiles(roots, func(p string) bool {
 		return strings.HasSuffix(p, ".jsonl") || strings.HasSuffix(p, ".json")
 	})
 	if err != nil {
 		return nil, err
 	}
-	if cfg.progress != nil {
-		cfg.progress.Set(fmt.Sprintf("Scanning %s: 0/%d files", sourceLabel(source), len(files)))
-	}
+	progress(onProgress, fmt.Sprintf("Scanning %s: 0/%d files", SourceLabel(source), len(files)))
 	var out []Event
 	for i, file := range files {
 		if strings.HasSuffix(file, ".jsonl") {
@@ -232,9 +178,7 @@ func readGenericSource(source string, roots []string, cfg Config) ([]Event, erro
 				return genericEvent(source, file, m)
 			})
 			out = append(out, events...)
-			if cfg.progress != nil {
-				cfg.progress.Set(fmt.Sprintf("Scanning %s: %d/%d files, %d events", sourceLabel(source), i+1, len(files), len(out)))
-			}
+			progress(onProgress, fmt.Sprintf("Scanning %s: %d/%d files, %d events", SourceLabel(source), i+1, len(files), len(out)))
 			continue
 		}
 		b, err := os.ReadFile(file)
@@ -249,9 +193,7 @@ func readGenericSource(source string, roots []string, cfg Config) ([]Event, erro
 				out = append(out, ev)
 			}
 		}
-		if cfg.progress != nil {
-			cfg.progress.Set(fmt.Sprintf("Scanning %s: %d/%d files, %d events", sourceLabel(source), i+1, len(files), len(out)))
-		}
+		progress(onProgress, fmt.Sprintf("Scanning %s: %d/%d files, %d events", SourceLabel(source), i+1, len(files), len(out)))
 	}
 	return out, nil
 }

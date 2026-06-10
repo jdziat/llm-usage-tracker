@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jdziat/llm-usage-tracker/pkg/core"
 )
 
 func TestRunRejectsInvalidLiveOutputModes(t *testing.T) {
@@ -45,25 +47,27 @@ func TestRunLiveRendersMultipleFrames(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg := Config{
-		View:            "daily",
-		Sources:         []string{SourceClaude},
-		Location:        time.UTC,
-		Order:           "asc",
-		Mode:            "display",
-		SessionLength:   5 * time.Hour,
-		RefreshInterval: 10 * time.Millisecond,
-		SourcePaths:     map[string][]string{SourceClaude: {root}},
-		Speed:           "standard",
-		StartOfWeek:     "monday",
+	q := core.Query{
+		View:          "daily",
+		Sources:       []string{core.SourceClaude},
+		Location:      time.UTC,
+		Order:         "asc",
+		Mode:          "display",
+		SessionLength: 5 * time.Hour,
+		SourcePaths:   map[string][]string{core.SourceClaude: {root}},
+		Speed:         "standard",
+		StartOfWeek:   "monday",
+	}
+	opts := RenderOptions{
 		Format:          "table",
-		Progress:        true,
+		progress:        true,
+		refreshInterval: 10 * time.Millisecond,
 	}
 	var out bytes.Buffer
 	stop := make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
-		done <- runLive(cfg, &out, bytes.NewBuffer(nil), stop)
+		done <- runLive(q, opts, &out, bytes.NewBuffer(nil), stop)
 	}()
 
 	time.Sleep(35 * time.Millisecond)

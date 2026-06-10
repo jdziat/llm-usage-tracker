@@ -5,10 +5,12 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jdziat/llm-usage-tracker/pkg/core"
 )
 
-func sampleRows() []Row {
-	return []Row{{
+func sampleRows() []core.Row {
+	return []core.Row{{
 		Key:          "2026-05-18",
 		Source:       "codex",
 		SessionID:    "s1",
@@ -16,7 +18,7 @@ func sampleRows() []Row {
 		Start:        time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC),
 		LastActivity: time.Date(2026, 5, 18, 10, 5, 0, 0, time.UTC),
 		ModelsUsed:   []string{"gpt-5.5"},
-		Tokens: Tokens{
+		Tokens: core.Tokens{
 			Input:     10,
 			Output:    3,
 			CacheRead: 20,
@@ -27,7 +29,7 @@ func sampleRows() []Row {
 
 func TestWriteCSVReport(t *testing.T) {
 	var buf bytes.Buffer
-	if err := writeCSV(&buf, Config{}, sampleRows()); err != nil {
+	if err := writeCSV(&buf, RenderOptions{}, sampleRows()); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -41,7 +43,12 @@ func TestWriteCSVReport(t *testing.T) {
 
 func TestWriteHTMLReport(t *testing.T) {
 	var buf bytes.Buffer
-	err := writeHTML(&buf, "Usage <Report>", Config{View: "daily"}, sampleRows(), []string{"warning <x>"})
+	err := writeHTML(&buf, "Usage <Report>", core.Query{View: "daily"}, RenderOptions{}, core.Result{
+		View:     "daily",
+		Rows:     sampleRows(),
+		Totals:   core.Tokens{Input: 10, Output: 3, CacheRead: 20, CostUSD: 0.001},
+		Warnings: []core.Warning{{Message: "warning <x>"}},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

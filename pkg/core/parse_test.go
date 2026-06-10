@@ -1,4 +1,4 @@
-package usage
+package core
 
 import (
 	"os"
@@ -22,7 +22,7 @@ func TestReadCodexUsesLastTokenUsageAndModelContext(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, err := readCodex([]string{filepath.Join(root, "sessions")}, Config{Speed: "standard"})
+	events, err := readCodex([]string{filepath.Join(root, "sessions")}, Query{Speed: "standard"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestReadClaudeDeduplicatesRepeatedRequestUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, err := readClaude([]string{root}, Config{})
+	events, err := readClaude([]string{root}, Query{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestReadClaudeSkipsZeroTokenSyntheticEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, err := readClaude([]string{root}, Config{})
+	events, err := readClaude([]string{root}, Query{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestAggregateDailyRespectsTimezone(t *testing.T) {
 		Time:      time.Date(2026, 5, 18, 23, 30, 0, 0, time.UTC),
 		Tokens:    Tokens{Input: 1},
 	}}
-	rows := aggregate(events, Config{View: "daily", Sources: []string{SourceCodex}, Location: loc, Order: "asc"})
+	rows := aggregate(events, Query{View: "daily", Sources: []string{SourceCodex}, Location: loc, Order: "asc"})
 	if len(rows) != 1 || rows[0].Key != "2026-05-19" {
 		t.Fatalf("rows = %+v, want Tokyo next-day key", rows)
 	}
