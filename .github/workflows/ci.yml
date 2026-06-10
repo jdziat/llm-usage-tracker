@@ -15,11 +15,25 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    # Never let a dev-only go.work (added by the desktop module) pull the
+    # Wails dependency graph into this root-module build.
+    env:
+      GOWORK: "off"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: zero-dependency invariant
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          # The CLI's selling point and CONTRIBUTING contract: the root module
+          # is stdlib-only. Fail the build if a dependency ever sneaks in.
+          test ! -s go.sum || { echo "go.sum is non-empty — a dependency was added to the root module"; exit 1; }
+          ! grep -qE '^\s*require' go.mod || { echo "go.mod has a require block — the root module must stay stdlib-only"; exit 1; }
+          ext=$(go list -deps ./cmd/llmut | grep -v '^github.com/jdziat/' | grep '\.' || true)
+          test -z "$ext" || { echo "cmd/llmut pulled external dependencies:"; echo "$ext"; exit 1; }
       - name: gofmt
         if: runner.os == 'Linux'
         run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
