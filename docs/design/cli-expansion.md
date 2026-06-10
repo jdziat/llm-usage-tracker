@@ -291,7 +291,7 @@ Coding Agent Usage Report - Trend (cost) - All Sources
   ▁▂▃▂▅▇▆▄▇   min $1.12   max $9.03   total $48.71
 ```
 
-Glyph mapping is a pure-stdlib min/max scale over a `[]float64` bucket series. ASCII fallback (`. : - = #`) when `--no-unicode` or a non-UTF-8 locale is detected.
+Glyph mapping is a pure-stdlib min/max scale over a `[]float64` bucket series. ASCII fallback (`._-=+*#@`, lowest level a visible glyph) when `--no-unicode` or a non-UTF-8 locale is detected.
 
 ### Implementation footprint
 New `sparkline.go`: `bucketSeries(events []Event, cfg Config, metric string) []float64` feeding off `filterEvents`, plus `sparkline(series []float64) string`. The `trend` view dispatches in `aggregate` (`aggregate.go:12`) to a thin wrapper over `aggregateByKey` returning the daily series. Pure-stdlib glyph mapping; big perceived-polish win.

@@ -12,6 +12,7 @@ type Query struct {
 	Since, Until  time.Time
 	Location      *time.Location
 	View          string
+	Sparkline     string
 	Compare       string
 	By            string
 	Project, ID   string
@@ -40,10 +41,22 @@ func (w Warning) MarshalJSON() ([]byte, error) {
 type Progress func(stage string)
 
 type Result struct {
-	View     string    `json:"view"`
-	Rows     []Row     `json:"data"`
-	Totals   Tokens    `json:"totals"`
-	Warnings []Warning `json:"warnings,omitempty"`
+	View          string               `json:"view"`
+	Rows          []Row                `json:"data"`
+	Totals        Tokens               `json:"totals"`
+	Trend         *Trend               `json:"trend,omitempty"`
+	SparklineRows map[string][]float64 `json:"sparklines,omitempty"`
+	Warnings      []Warning            `json:"warnings,omitempty"`
+}
+
+type Trend struct {
+	Metric string    `json:"metric"`
+	Start  time.Time `json:"start,omitempty"`
+	End    time.Time `json:"end,omitempty"`
+	Series []float64 `json:"series"`
+	Min    float64   `json:"min"`
+	Max    float64   `json:"max"`
+	Total  float64   `json:"total"`
 }
 
 func LoadAndAggregate(q Query, onProgress Progress) (Result, error) {
@@ -81,6 +94,12 @@ func LoadAndAggregate(q Query, onProgress Progress) (Result, error) {
 	progress(onProgress, fmt.Sprintf("Calculated costs for %d events", len(events)))
 	rows := aggregate(events, q)
 	res := Result{View: q.View, Rows: rows, Warnings: warnings}
+	if q.View == "trend" {
+		res.Trend = buildTrend(events, q, q.Sparkline)
+	}
+	if q.Sparkline != "" && (q.View == "weekly" || q.View == "monthly") {
+		res.SparklineRows = rowSparklineSeries(events, q, q.Sparkline)
+	}
 	for _, row := range rows {
 		res.Totals.Add(row.Tokens)
 	}

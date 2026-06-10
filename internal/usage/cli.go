@@ -16,7 +16,7 @@ import (
 	"github.com/jdziat/llm-usage-tracker/pkg/core"
 )
 
-var views = map[string]bool{"daily": true, "weekly": true, "monthly": true, "session": true, "summary": true, "blocks": true, "statusline": true}
+var views = map[string]bool{"daily": true, "weekly": true, "monthly": true, "session": true, "summary": true, "blocks": true, "statusline": true, "trend": true}
 var sources = map[string]bool{core.SourceClaude: true, core.SourceCodex: true, core.SourceOpenCode: true, core.SourceAmp: true, core.SourcePI: true}
 
 func Run(args []string, stdout, stderr io.Writer) error {
@@ -108,6 +108,7 @@ func validateLiveConfig(opts RenderOptions) error {
 }
 
 func parseArgs(args []string) (core.Query, RenderOptions, bool, error) {
+	args = normalizeSparklineArgs(args)
 	q := core.Query{
 		View:          "daily",
 		Sources:       core.AllSources(),
@@ -151,6 +152,7 @@ func parseArgs(args []string) (core.Query, RenderOptions, bool, error) {
 	fs.BoolVar(&q.Recent, "r", false, "recent blocks")
 	fs.BoolVar(&opts.Compact, "compact", false, "compact output")
 	fs.BoolVar(&opts.Debug, "debug", false, "debug")
+	fs.BoolVar(&opts.NoUnicode, "no-unicode", false, "force ASCII sparklines")
 	fs.BoolVar(&live, "live", false, "refresh output until interrupted")
 	fs.BoolVar(&opts.progress, "progress", true, "show scan progress on stderr")
 	fs.BoolFunc("no-progress", "disable scan progress", func(string) error {
@@ -183,6 +185,7 @@ func parseArgs(args []string) (core.Query, RenderOptions, bool, error) {
 	fs.StringVar(&sessionLength, "session-length", "5", "block length hours")
 	fs.StringVar(&refresh, "refresh-interval", "5", "refresh interval seconds")
 	fs.StringVar(&q.Speed, "speed", "auto", "codex pricing speed: auto, standard, fast")
+	fs.StringVar(&q.Sparkline, "sparkline", "", "sparkline metric: cost or total")
 	fs.StringVar(&fields, "fields", "", "comma-separated columns for table, pretty, and csv output; JSON always emits full rows")
 	fs.Float64Var(&opts.Budget, "budget", 0, "cost budget in USD")
 	fs.StringVar(&opts.BudgetPeriod, "budget-period", "month", "budget window: day, week, or month")
@@ -245,7 +248,7 @@ func parseArgs(args []string) (core.Query, RenderOptions, bool, error) {
 		return q, opts, live, fmt.Errorf("--format must be table, pretty, json, csv, or html")
 	}
 	if !views[q.View] {
-		return q, opts, live, fmt.Errorf("view must be daily, weekly, monthly, session, summary, blocks, or statusline")
+		return q, opts, live, fmt.Errorf("view must be daily, weekly, monthly, session, summary, blocks, statusline, or trend")
 	}
 	for _, source := range q.Sources {
 		if !sources[source] {
@@ -289,6 +292,15 @@ func parseArgs(args []string) (core.Query, RenderOptions, bool, error) {
 	}
 	if q.Speed != "auto" && q.Speed != "standard" && q.Speed != "fast" {
 		return q, opts, live, fmt.Errorf("--speed must be auto, standard, or fast")
+	}
+	if q.Sparkline != "" && q.Sparkline != "cost" && q.Sparkline != "total" && q.Sparkline != "tokens" {
+		return q, opts, live, fmt.Errorf("--sparkline must be cost, total, or tokens")
+	}
+	if q.View == "trend" && q.Sparkline == "" {
+		q.Sparkline = "cost"
+	}
+	if !opts.NoUnicode && !localeSupportsUnicode() {
+		opts.NoUnicode = true
 	}
 	if opts.BudgetPeriod != "day" && opts.BudgetPeriod != "week" && opts.BudgetPeriod != "month" {
 		return q, opts, live, fmt.Errorf("--budget-period must be day, week, or month")
@@ -367,6 +379,35 @@ func explicitFlags(fs *flag.FlagSet) map[string]bool {
 		explicit["progress"] = true
 	}
 	return explicit
+}
+
+func normalizeSparklineArgs(args []string) []string {
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg != "--sparkline" {
+			out = append(out, arg)
+			continue
+		}
+		if i+1 >= len(args) || strings.HasPrefix(args[i+1], "-") || views[args[i+1]] || sources[args[i+1]] {
+			out = append(out, "--sparkline=cost")
+			continue
+		}
+		out = append(out, arg)
+	}
+	return out
+}
+
+func localeSupportsUnicode() bool {
+	locale := os.Getenv("LANG")
+	if v := os.Getenv("LC_CTYPE"); v != "" {
+		locale = v
+	}
+	if v := os.Getenv("LC_ALL"); v != "" {
+		locale = v
+	}
+	upper := strings.ToUpper(locale)
+	return strings.Contains(upper, "UTF-8") || strings.Contains(upper, "UTF8")
 }
 
 func applyConfigDefaults(path string, explicit map[string]bool, q *core.Query, opts *RenderOptions, since, until, timezone, sourcePath, claudePath, codexPath, opencodePath, ampPath, piPath, tokenLimit, sessionLength, refresh, fields *string) error {
@@ -651,7 +692,7 @@ Sources:
   claude, codex, opencode, amp, pi
 
 Views:
-  daily, weekly, monthly, session, summary, blocks, statusline
+  daily, weekly, monthly, session, summary, blocks, statusline, trend
 
 Examples:
   llmut daily --since 2026-05-01 --breakdown
@@ -659,6 +700,7 @@ Examples:
   llmut codex monthly --json --speed fast
   llmut daily --format html --output usage.html
   llmut daily --format csv --output usage.csv
+  llmut trend --since 2026-06-01 --sparkline cost
   llmut daily --no-progress
   llmut claude blocks --active
   llmut claude blocks --active --live
@@ -706,6 +748,7 @@ _llmut() {
   prev="${COMP_WORDS[COMP_CWORD-1]}"
   case "$prev" in
     --format) COMPREPLY=( $(compgen -W "table pretty json csv html" -- "$cur") ); return 0 ;;
+    --sparkline) COMPREPLY=( $(compgen -W "cost total" -- "$cur") ); return 0 ;;
     --order) COMPREPLY=( $(compgen -W "asc desc" -- "$cur") ); return 0 ;;
     --start-of-week) COMPREPLY=( $(compgen -W "monday sunday" -- "$cur") ); return 0 ;;
     --mode) COMPREPLY=( $(compgen -W "auto calculate display" -- "$cur") ); return 0 ;;
@@ -714,10 +757,10 @@ _llmut() {
     --budget-period) COMPREPLY=( $(compgen -W "day week month" -- "$cur") ); return 0 ;;
   esac
   if [[ "$cur" == -* ]]; then
-    COMPREPLY=( $(compgen -W "--json -j --format --output -o --breakdown -b --instances -i --active -a --recent -r --compact --debug --live --progress --no-progress --cache --offline -O --since --until --compare --timezone -z --order --start-of-week --mode --by --project -p --id --top --path --claude-path --codex-path --opencode-path --amp-path --pi-path --token-limit --session-length --refresh-interval --speed --fields --budget --budget-period --token-budget --budget-exit --config --locale --debug-samples --help -h" -- "$cur") )
+    COMPREPLY=( $(compgen -W "--json -j --format --output -o --breakdown -b --instances -i --active -a --recent -r --compact --debug --no-unicode --live --progress --no-progress --cache --offline -O --since --until --compare --timezone -z --order --start-of-week --mode --by --project -p --id --top --path --claude-path --codex-path --opencode-path --amp-path --pi-path --token-limit --session-length --refresh-interval --speed --sparkline --fields --budget --budget-period --token-budget --budget-exit --config --locale --debug-samples --help -h" -- "$cur") )
     return 0
   fi
-  COMPREPLY=( $(compgen -W "completion claude codex opencode amp pi daily weekly monthly session summary blocks statusline" -- "$cur") )
+  COMPREPLY=( $(compgen -W "completion claude codex opencode amp pi daily weekly monthly session summary blocks statusline trend" -- "$cur") )
 }
 complete -F _llmut llmut
 `
@@ -728,13 +771,13 @@ func zshCompletion() string {
 _llmut() {
   local -a sources views flags
   sources=(claude codex opencode amp pi)
-  views=(daily weekly monthly session summary blocks statusline)
+  views=(daily weekly monthly session summary blocks statusline trend)
   flags=(
     '--json[emit JSON]' '-j[emit JSON]' '--format[output format]:format:(table pretty json csv html)'
     '--output[write report to file]:file:_files' '-o[write report to file]:file:_files'
     '--breakdown[show per-model breakdown]' '-b[show per-model breakdown]'
     '--instances[group by project]' '-i[group by project]' '--active[only active block]' '-a[only active block]'
-    '--recent[recent blocks]' '-r[recent blocks]' '--compact[compact output]' '--debug[debug]' '--live[live refresh]'
+    '--recent[recent blocks]' '-r[recent blocks]' '--compact[compact output]' '--debug[debug]' '--no-unicode[force ASCII sparklines]' '--live[live refresh]'
     '--progress[show progress]' '--no-progress[disable progress]' '--cache[compatibility no-op]' '--offline[compatibility no-op]' '-O[compatibility no-op]'
     '--since[start date]:date:' '--until[end date]:date:' '--compare[comparison baseline]:compare:' '--timezone[timezone]:timezone:' '-z[timezone]:timezone:'
     '--order[sort order]:order:(asc desc)' '--start-of-week[start of week]:(monday sunday)'
@@ -743,13 +786,13 @@ _llmut() {
     '--claude-path[Claude projects path]:path:_files' '--codex-path[Codex path]:path:_files'
     '--opencode-path[OpenCode path]:path:_files' '--amp-path[Amp path]:path:_files' '--pi-path[pi-agent path]:path:_files'
     '--token-limit[token warning limit]:tokens:' '--session-length[block length hours]:hours:'
-    '--refresh-interval[refresh seconds]:seconds:' '--speed[codex speed]:speed:(auto standard fast)'
+    '--refresh-interval[refresh seconds]:seconds:' '--speed[codex speed]:speed:(auto standard fast)' '--sparkline[sparkline metric]:metric:(cost total)'
     '--fields[column list]:fields:' '--budget[cost budget]:usd:' '--budget-period[budget period]:period:(day week month)' '--token-budget[token budget]:tokens:' '--budget-exit[exit when over budget]' '--config[config file]:file:_files' '--locale[compatibility no-op]:locale:'
     '--debug-samples[compatibility no-op]:count:' '--help[help]' '-h[help]'
   )
   _arguments -C \
-    '1:source, view, or subcommand:((completion\:completion claude\:Claude codex\:Codex opencode\:OpenCode amp\:Amp pi\:pi daily\:daily weekly\:weekly monthly\:monthly session\:session summary\:summary blocks\:blocks statusline\:statusline))' \
-    '2:source, view, or shell:((bash\:bash zsh\:zsh fish\:fish daily\:daily weekly\:weekly monthly\:monthly session\:session summary\:summary blocks\:blocks statusline\:statusline))' \
+    '1:source, view, or subcommand:((completion\:completion claude\:Claude codex\:Codex opencode\:OpenCode amp\:Amp pi\:pi daily\:daily weekly\:weekly monthly\:monthly session\:session summary\:summary blocks\:blocks statusline\:statusline trend\:trend))' \
+    '2:source, view, or shell:((bash\:bash zsh\:zsh fish\:fish daily\:daily weekly\:weekly monthly\:monthly session\:session summary\:summary blocks\:blocks statusline\:statusline trend\:trend))' \
     $flags
 }
 _llmut "$@"
@@ -759,7 +802,7 @@ _llmut "$@"
 func fishCompletion() string {
 	return `# fish completion for llmut
 complete -c llmut -f
-complete -c llmut -n '__fish_use_subcommand' -a 'completion claude codex opencode amp pi daily weekly monthly session summary blocks statusline'
+complete -c llmut -n '__fish_use_subcommand' -a 'completion claude codex opencode amp pi daily weekly monthly session summary blocks statusline trend'
 complete -c llmut -n '__fish_seen_subcommand_from completion' -a 'bash zsh fish'
 complete -c llmut -l json -s j -d 'emit JSON'
 complete -c llmut -l format -a 'table pretty json csv html' -d 'output format'
@@ -770,6 +813,7 @@ complete -c llmut -l active -s a -d 'only active block'
 complete -c llmut -l recent -s r -d 'recent blocks'
 complete -c llmut -l compact -d 'compact output'
 complete -c llmut -l debug -d 'debug'
+complete -c llmut -l no-unicode -d 'force ASCII sparklines'
 complete -c llmut -l live -d 'refresh output'
 complete -c llmut -l progress -d 'show progress'
 complete -c llmut -l no-progress -d 'disable progress'
@@ -794,6 +838,7 @@ complete -c llmut -l token-limit -r -d 'token warning limit'
 complete -c llmut -l session-length -r -d 'block length hours'
 complete -c llmut -l refresh-interval -r -d 'refresh seconds'
 complete -c llmut -l speed -a 'auto standard fast' -d 'codex pricing speed'
+complete -c llmut -l sparkline -a 'cost total' -d 'sparkline metric'
 complete -c llmut -l fields -r -d 'column list'
 complete -c llmut -l budget -r -d 'cost budget'
 complete -c llmut -l budget-period -a 'day week month' -d 'budget period'
@@ -840,6 +885,13 @@ func title(q core.Query) string {
 	view := q.View
 	if view != "" {
 		view = strings.ToUpper(view[:1]) + view[1:]
+	}
+	if q.View == "trend" {
+		metric := q.Sparkline
+		if metric == "" {
+			metric = "cost"
+		}
+		view = fmt.Sprintf("%s (%s)", view, metric)
 	}
 	return fmt.Sprintf("Coding Agent Usage Report - %s - %s", view, scope)
 }

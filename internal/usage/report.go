@@ -26,6 +26,7 @@ type RenderOptions struct {
 	TokenBudget  int64
 	BudgetExit   bool
 	BudgetStatus *BudgetStatus
+	NoUnicode    bool
 
 	progress        bool
 	refreshInterval time.Duration
@@ -68,6 +69,10 @@ func renderReport(out io.Writer, res core.Result, q core.Query, opts RenderOptio
 		writeStatusline(out, res.Rows, q, opts)
 		return
 	}
+	if q.View == "trend" {
+		writeTrend(out, res, q, opts)
+		return
+	}
 	if len(res.Rows) == 0 {
 		fmt.Fprintln(out, "No usage data found.")
 		return
@@ -100,14 +105,14 @@ func writeTable(w io.Writer, title string, res core.Result, q core.Query, opts R
 	printColumnRow(w, widths, cols, headers)
 	printSep(w, widths)
 	for _, row := range res.Rows {
-		printColumnRow(w, widths, cols, rowCells(cols, row, q, false, false, widths))
+		printColumnRow(w, widths, cols, rowCells(cols, row, q, false, false, widths, res.SparklineRows, opts.NoUnicode))
 		if opts.Breakdown {
 			for _, b := range row.ModelBreakdowns {
 				breakdown := row
 				breakdown.Key = b.Model
 				breakdown.ModelsUsed = nil
 				breakdown.Tokens = b.Tokens
-				printColumnRow(w, widths, cols, rowCells(cols, breakdown, q, true, false, widths))
+				printColumnRow(w, widths, cols, rowCells(cols, breakdown, q, true, false, widths, nil, opts.NoUnicode))
 			}
 		}
 	}
@@ -128,14 +133,14 @@ func writePrettyTable(w io.Writer, title string, res core.Result, q core.Query, 
 	printBoxColumnRow(w, widths, cols, headers)
 	printBoxBorder(w, widths, "mid")
 	for _, row := range res.Rows {
-		printBoxColumnRow(w, widths, cols, rowCells(cols, row, q, false, false, widths))
+		printBoxColumnRow(w, widths, cols, rowCells(cols, row, q, false, false, widths, res.SparklineRows, opts.NoUnicode))
 		if opts.Breakdown {
 			for _, b := range row.ModelBreakdowns {
 				breakdown := row
 				breakdown.Key = b.Model
 				breakdown.ModelsUsed = nil
 				breakdown.Tokens = b.Tokens
-				printBoxColumnRow(w, widths, cols, rowCells(cols, breakdown, q, true, false, widths))
+				printBoxColumnRow(w, widths, cols, rowCells(cols, breakdown, q, true, false, widths, nil, opts.NoUnicode))
 			}
 		}
 	}
@@ -235,7 +240,7 @@ func writeCSV(w io.Writer, opts RenderOptions, rows []core.Row) error {
 			return err
 		}
 		for _, row := range rows {
-			if err := cw.Write(rowCells(cols, row, core.Query{}, false, true, nil)); err != nil {
+			if err := cw.Write(rowCells(cols, row, core.Query{}, false, true, nil, nil, false)); err != nil {
 				return err
 			}
 			if opts.Breakdown {
@@ -244,7 +249,7 @@ func writeCSV(w io.Writer, opts RenderOptions, rows []core.Row) error {
 					breakdown.Key = "  " + b.Model
 					breakdown.ModelsUsed = []string{b.Model}
 					breakdown.Tokens = b.Tokens
-					if err := cw.Write(rowCells(cols, breakdown, core.Query{}, false, true, nil)); err != nil {
+					if err := cw.Write(rowCells(cols, breakdown, core.Query{}, false, true, nil, nil, false)); err != nil {
 						return err
 					}
 				}
@@ -309,14 +314,14 @@ tr.breakdown td:first-child{padding-left:28px;color:#52606d}
 	cols := selectedColumns(q, opts)
 	fmt.Fprintln(w, htmlHeaderRow(cols, q))
 	for _, row := range res.Rows {
-		writeHTMLRow(w, row, "", cols, q)
+		writeHTMLRow(w, row, "", cols, q, res.SparklineRows, opts.NoUnicode)
 		if opts.Breakdown {
 			for _, b := range row.ModelBreakdowns {
 				breakdown := row
 				breakdown.Key = b.Model
 				breakdown.ModelsUsed = nil
 				breakdown.Tokens = b.Tokens
-				writeHTMLRow(w, breakdown, ` class="breakdown"`, cols, q)
+				writeHTMLRow(w, breakdown, ` class="breakdown"`, cols, q, nil, opts.NoUnicode)
 			}
 		}
 	}
@@ -348,6 +353,26 @@ func writeStatusline(w io.Writer, rows []core.Row, q core.Query, opts RenderOpti
 		limit = fmt.Sprintf(" %.0f%%", float64(r.Total())/float64(opts.TokenLimit)*100)
 	}
 	fmt.Fprintf(w, "Claude %s tokens %s %s left%s\n", formatInt(r.Total()), formatCost(r.CostUSD), remaining.Round(time.Minute), limit)
+}
+
+func writeTrend(w io.Writer, res core.Result, q core.Query, opts RenderOptions) {
+	trend := res.Trend
+	if trend == nil {
+		metric := q.Sparkline
+		if metric == "" {
+			metric = "cost"
+		}
+		trend = &core.Trend{Metric: metric}
+	}
+	title := title(q)
+	fmt.Fprintln(w, title)
+	fmt.Fprintln(w, strings.Repeat("-", len(title)))
+	if len(trend.Series) == 0 {
+		fmt.Fprintln(w, "No usage data found.")
+		return
+	}
+	fmt.Fprintf(w, "%s .. %s\n", trend.Start.In(q.Location).Format("2006-01-02"), trend.End.In(q.Location).Format("2006-01-02"))
+	fmt.Fprintf(w, "  %s   min %s   max %s   total %s\n", core.Sparkline(trend.Series, opts.NoUnicode), formatTrendValue(trend.Min, trend.Metric), formatTrendValue(trend.Max, trend.Metric), formatTrendValue(trend.Total, trend.Metric))
 }
 
 func printColumnRow(w io.Writer, widths []int, cols []fieldColumn, cells []string) {
@@ -505,9 +530,9 @@ func csvRow(row core.Row) []string {
 	}
 }
 
-func writeHTMLRow(w io.Writer, row core.Row, class string, cols []fieldColumn, q core.Query) {
+func writeHTMLRow(w io.Writer, row core.Row, class string, cols []fieldColumn, q core.Query, sparkRows map[string][]float64, ascii bool) {
 	fmt.Fprintf(w, "<tr%s>", class)
-	cells := rowCells(cols, row, q, false, false, nil)
+	cells := rowCells(cols, row, q, false, false, nil, sparkRows, ascii)
 	for i, col := range cols {
 		cell := cells[i]
 		if col.name == "models" {
@@ -576,6 +601,8 @@ func reportWidths(q core.Query, opts RenderOptions, cols []fieldColumn) []int {
 			widths[i] = minWidth(q, opts)
 		case "models":
 			widths[i] = modelWidth(opts)
+		case "sparkline":
+			widths[i] = sparklineWidth(q)
 		default:
 			widths[i] = col.width
 		}
@@ -611,6 +638,7 @@ var fieldRegistry = map[string]fieldColumn{
 	"cost":       {name: "cost", header: "Cost", csvHeader: "cost_usd", width: 11, value: func(r core.Row) string { return formatCost(r.CostUSD) }, total: func(t core.Tokens) string { return formatCost(t.CostUSD) }},
 	"credits":    {name: "credits", header: "Credits", csvHeader: "credits", width: 11, value: func(r core.Row) string { return fmt.Sprintf("%.6f", r.Credits) }, total: func(t core.Tokens) string { return fmt.Sprintf("%.6f", t.Credits) }},
 	"models":     {name: "models", header: "Models", csvHeader: "models", left: true, value: func(r core.Row) string { return strings.Join(r.ModelsUsed, ",") }},
+	"sparkline":  {name: "sparkline", header: "Trend", csvHeader: "sparkline", left: true, width: 10, value: func(core.Row) string { return "" }},
 }
 
 var fieldAliases = map[string]string{
@@ -664,6 +692,11 @@ func selectedColumns(q core.Query, opts RenderOptions) []fieldColumn {
 	if len(fields) == 0 {
 		fields = defaultTableFields
 	}
+	// Daily rows are already one-day buckets, so --sparkline intentionally has
+	// no sub-shape to render for the daily view.
+	if q.Sparkline != "" && (q.View == "weekly" || q.View == "monthly") {
+		fields = append(append([]string(nil), fields...), "sparkline")
+	}
 	cols := make([]fieldColumn, 0, len(fields))
 	for _, name := range fields {
 		col := fieldRegistry[name]
@@ -695,14 +728,18 @@ func csvHeaders(cols []fieldColumn) []string {
 	return headers
 }
 
-func rowCells(cols []fieldColumn, row core.Row, _ core.Query, breakdown bool, csvMode bool, widths []int) []string {
+func rowCells(cols []fieldColumn, row core.Row, _ core.Query, breakdown bool, csvMode bool, widths []int, sparkRows map[string][]float64, ascii bool) []string {
 	cells := make([]string, len(cols))
 	for i, col := range cols {
 		if breakdown && col.name == "models" {
 			cells[i] = ""
 			continue
 		}
-		if csvMode {
+		if col.name == "sparkline" {
+			if sparkRows != nil {
+				cells[i] = core.Sparkline(sparkRows[row.Key], ascii)
+			}
+		} else if csvMode {
 			cells[i] = csvFieldValue(col.name, row)
 		} else {
 			cells[i] = col.value(row)
@@ -751,6 +788,24 @@ func totalCells(cols []fieldColumn, totals core.Tokens) []string {
 		}
 	}
 	return cells
+}
+
+func sparklineWidth(q core.Query) int {
+	switch q.View {
+	case "weekly":
+		return 7
+	case "monthly":
+		return 31
+	default:
+		return 10
+	}
+}
+
+func formatTrendValue(v float64, metric string) string {
+	if metric == "total" || metric == "tokens" {
+		return formatInt(int64(math.Round(v)))
+	}
+	return formatCost(v)
 }
 
 func htmlHeaderRow(cols []fieldColumn, q core.Query) string {

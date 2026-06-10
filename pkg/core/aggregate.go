@@ -24,6 +24,10 @@ func aggregate(events []Event, cfg Query) []Row {
 		})
 	case "blocks":
 		return aggregateBlocks(filtered, cfg)
+	case "trend":
+		return aggregateByKey(filtered, cfg, func(t time.Time, _ *time.Location) string {
+			return t.In(cfg.Location).Format("2006-01-02")
+		})
 	default:
 		return aggregateByKey(filtered, cfg, func(t time.Time, _ *time.Location) string {
 			return t.In(cfg.Location).Format("2006-01-02")
