@@ -29,10 +29,15 @@ jobs:
         shell: bash
         run: |
           # The CLI's selling point and CONTRIBUTING contract: the root module
-          # is stdlib-only. Fail the build if a dependency ever sneaks in.
+          # is stdlib-only. Fail the build if a dependency ever sneaks in. The
+          # go.mod (no require) + absent go.sum are the load-bearing guarantees;
+          # the go list grep is a belt-and-suspenders. It excludes ^vendor/
+          # because the standard library vendors golang.org/x/{net,crypto,text}
+          # into GOROOT (net/http pulls these) — those are stdlib-internal, not
+          # external module deps, and carry a vendor/ prefix in go list output.
           test ! -s go.sum || { echo "go.sum is non-empty — a dependency was added to the root module"; exit 1; }
           ! grep -qE '^\s*require' go.mod || { echo "go.mod has a require block — the root module must stay stdlib-only"; exit 1; }
-          ext=$(go list -deps ./cmd/llmut | grep -v '^github.com/jdziat/' | grep '\.' || true)
+          ext=$(go list -deps ./cmd/llmut | grep -v '^github.com/jdziat/' | grep -v '^vendor/' | grep '\.' || true)
           test -z "$ext" || { echo "cmd/llmut pulled external dependencies:"; echo "$ext"; exit 1; }
       - name: gofmt
         if: runner.os == 'Linux'

@@ -31,6 +31,9 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		}
 		return err
 	}
+	if opts.serve {
+		return serveHTTP(q, opts, stderr)
+	}
 	if live {
 		if err := validateLiveConfig(opts); err != nil {
 			return err
@@ -126,6 +129,8 @@ func parseArgs(args []string) (core.Query, RenderOptions, bool, error) {
 		progress:        true,
 		refreshInterval: 5 * time.Second,
 		BudgetPeriod:    "month",
+		serveHost:       "127.0.0.1",
+		servePort:       8787,
 	}
 	if len(args) > 0 && (args[0] == "help" || args[0] == "--help" || args[0] == "-h") {
 		return q, opts, false, flag.ErrHelp
@@ -162,6 +167,7 @@ func parseArgs(args []string) (core.Query, RenderOptions, bool, error) {
 	fs.BoolVar(&ignoredCache, "cache", false, "no-op, accepted for ccusage statusline compatibility")
 	fs.Bool("offline", false, "no-op, accepted for ccusage compatibility (pricing is always offline)")
 	fs.Bool("O", false, "no-op, accepted for ccusage compatibility (pricing is always offline)")
+	fs.StringVar(&q.View, "view", "daily", "view: daily, weekly, monthly, session, summary, blocks, statusline, trend")
 	fs.StringVar(&since, "since", "", "start date")
 	fs.StringVar(&until, "until", "", "end date")
 	fs.StringVar(&q.Compare, "compare", "", "compare against previous or YYYY-MM-DD..YYYY-MM-DD")
@@ -191,6 +197,8 @@ func parseArgs(args []string) (core.Query, RenderOptions, bool, error) {
 	fs.StringVar(&opts.BudgetPeriod, "budget-period", "month", "budget window: day, week, or month")
 	fs.Int64Var(&opts.TokenBudget, "token-budget", 0, "token budget")
 	fs.BoolVar(&opts.BudgetExit, "budget-exit", false, "exit with code 2 when over budget")
+	fs.StringVar(&opts.serveHost, "host", "127.0.0.1", "host for local web dashboard")
+	fs.IntVar(&opts.servePort, "port", 8787, "port for local web dashboard")
 	fs.StringVar(&ignoredLocale, "locale", "", "no-op, accepted for ccusage compatibility")
 	fs.Int("debug-samples", 0, "no-op, accepted for ccusage compatibility")
 	fs.StringVar(&configPath, "config", "", "config file path")
@@ -223,6 +231,10 @@ func parseArgs(args []string) (core.Query, RenderOptions, bool, error) {
 	if len(positionals) > 0 && views[positionals[0]] {
 		q.View = positionals[0]
 		explicit["view"] = true
+		positionals = positionals[1:]
+	}
+	if len(positionals) > 0 && positionals[0] == "serve" {
+		opts.serve = true
 		positionals = positionals[1:]
 	}
 	if len(positionals) > 0 && sources[positionals[0]] {
@@ -292,6 +304,9 @@ func parseArgs(args []string) (core.Query, RenderOptions, bool, error) {
 	}
 	if q.Speed != "auto" && q.Speed != "standard" && q.Speed != "fast" {
 		return q, opts, live, fmt.Errorf("--speed must be auto, standard, or fast")
+	}
+	if opts.servePort < 1 || opts.servePort > 65535 {
+		return q, opts, live, fmt.Errorf("--port must be between 1 and 65535")
 	}
 	if q.Sparkline != "" && q.Sparkline != "cost" && q.Sparkline != "total" && q.Sparkline != "tokens" {
 		return q, opts, live, fmt.Errorf("--sparkline must be cost, total, or tokens")
@@ -686,6 +701,7 @@ func printHelp(w io.Writer) {
 
 Usage:
   llmut [source] [view] [options]
+  llmut [source] serve [options]
   llmut completion bash|zsh|fish
 
 Sources:
@@ -705,9 +721,13 @@ Examples:
   llmut claude blocks --active
   llmut claude blocks --active --live
   llmut daily --live --refresh-interval 2
+  llmut claude serve --port 8787
   llmut pi session --pi-path ~/.pi/agent/sessions
 
 Options:
+  --host <host> binds the web dashboard host (default 127.0.0.1).
+  --port <port> binds the web dashboard port (default 8787).
+  --view <view> selects the dashboard/report view.
   --fields <list> selects ordered table/pretty/csv columns. Valid fields:
     key, input, output, cache_cr, cache_rd, reasoning, total, cost, credits, models,
     source, session_id, project, start, last
@@ -748,6 +768,7 @@ _llmut() {
   prev="${COMP_WORDS[COMP_CWORD-1]}"
   case "$prev" in
     --format) COMPREPLY=( $(compgen -W "table pretty json csv html" -- "$cur") ); return 0 ;;
+    --view) COMPREPLY=( $(compgen -W "daily weekly monthly session summary blocks statusline trend" -- "$cur") ); return 0 ;;
     --sparkline) COMPREPLY=( $(compgen -W "cost total" -- "$cur") ); return 0 ;;
     --order) COMPREPLY=( $(compgen -W "asc desc" -- "$cur") ); return 0 ;;
     --start-of-week) COMPREPLY=( $(compgen -W "monday sunday" -- "$cur") ); return 0 ;;
@@ -757,10 +778,10 @@ _llmut() {
     --budget-period) COMPREPLY=( $(compgen -W "day week month" -- "$cur") ); return 0 ;;
   esac
   if [[ "$cur" == -* ]]; then
-    COMPREPLY=( $(compgen -W "--json -j --format --output -o --breakdown -b --instances -i --active -a --recent -r --compact --debug --no-unicode --live --progress --no-progress --cache --offline -O --since --until --compare --timezone -z --order --start-of-week --mode --by --project -p --id --top --path --claude-path --codex-path --opencode-path --amp-path --pi-path --token-limit --session-length --refresh-interval --speed --sparkline --fields --budget --budget-period --token-budget --budget-exit --config --locale --debug-samples --help -h" -- "$cur") )
+    COMPREPLY=( $(compgen -W "--json -j --format --output -o --breakdown -b --instances -i --active -a --recent -r --compact --debug --no-unicode --live --progress --no-progress --cache --offline -O --view --since --until --compare --timezone -z --order --start-of-week --mode --by --project -p --id --top --path --claude-path --codex-path --opencode-path --amp-path --pi-path --token-limit --session-length --refresh-interval --speed --sparkline --fields --budget --budget-period --token-budget --budget-exit --host --port --config --locale --debug-samples --help -h" -- "$cur") )
     return 0
   fi
-  COMPREPLY=( $(compgen -W "completion claude codex opencode amp pi daily weekly monthly session summary blocks statusline trend" -- "$cur") )
+  COMPREPLY=( $(compgen -W "completion serve claude codex opencode amp pi daily weekly monthly session summary blocks statusline trend" -- "$cur") )
 }
 complete -F _llmut llmut
 `
@@ -779,7 +800,7 @@ _llmut() {
     '--instances[group by project]' '-i[group by project]' '--active[only active block]' '-a[only active block]'
     '--recent[recent blocks]' '-r[recent blocks]' '--compact[compact output]' '--debug[debug]' '--no-unicode[force ASCII sparklines]' '--live[live refresh]'
     '--progress[show progress]' '--no-progress[disable progress]' '--cache[compatibility no-op]' '--offline[compatibility no-op]' '-O[compatibility no-op]'
-    '--since[start date]:date:' '--until[end date]:date:' '--compare[comparison baseline]:compare:' '--timezone[timezone]:timezone:' '-z[timezone]:timezone:'
+    '--view[view]:view:(daily weekly monthly session summary blocks statusline trend)' '--since[start date]:date:' '--until[end date]:date:' '--compare[comparison baseline]:compare:' '--timezone[timezone]:timezone:' '-z[timezone]:timezone:'
     '--order[sort order]:order:(asc desc)' '--start-of-week[start of week]:(monday sunday)'
     '--mode[cost mode]:mode:(auto calculate display)' '--by[summary rollup]:by:(model project source)' '--project[project filter]:project:' '-p[project filter]:project:'
     '--id[session id filter]:id:' '--top[row limit]:count:' '--path[source path]:path:_files'
@@ -787,11 +808,11 @@ _llmut() {
     '--opencode-path[OpenCode path]:path:_files' '--amp-path[Amp path]:path:_files' '--pi-path[pi-agent path]:path:_files'
     '--token-limit[token warning limit]:tokens:' '--session-length[block length hours]:hours:'
     '--refresh-interval[refresh seconds]:seconds:' '--speed[codex speed]:speed:(auto standard fast)' '--sparkline[sparkline metric]:metric:(cost total)'
-    '--fields[column list]:fields:' '--budget[cost budget]:usd:' '--budget-period[budget period]:period:(day week month)' '--token-budget[token budget]:tokens:' '--budget-exit[exit when over budget]' '--config[config file]:file:_files' '--locale[compatibility no-op]:locale:'
+    '--fields[column list]:fields:' '--budget[cost budget]:usd:' '--budget-period[budget period]:period:(day week month)' '--token-budget[token budget]:tokens:' '--budget-exit[exit when over budget]' '--host[dashboard host]:host:' '--port[dashboard port]:port:' '--config[config file]:file:_files' '--locale[compatibility no-op]:locale:'
     '--debug-samples[compatibility no-op]:count:' '--help[help]' '-h[help]'
   )
   _arguments -C \
-    '1:source, view, or subcommand:((completion\:completion claude\:Claude codex\:Codex opencode\:OpenCode amp\:Amp pi\:pi daily\:daily weekly\:weekly monthly\:monthly session\:session summary\:summary blocks\:blocks statusline\:statusline trend\:trend))' \
+    '1:source, view, or subcommand:((completion\:completion serve\:serve claude\:Claude codex\:Codex opencode\:OpenCode amp\:Amp pi\:pi daily\:daily weekly\:weekly monthly\:monthly session\:session summary\:summary blocks\:blocks statusline\:statusline trend\:trend))' \
     '2:source, view, or shell:((bash\:bash zsh\:zsh fish\:fish daily\:daily weekly\:weekly monthly\:monthly session\:session summary\:summary blocks\:blocks statusline\:statusline trend\:trend))' \
     $flags
 }
@@ -802,7 +823,7 @@ _llmut "$@"
 func fishCompletion() string {
 	return `# fish completion for llmut
 complete -c llmut -f
-complete -c llmut -n '__fish_use_subcommand' -a 'completion claude codex opencode amp pi daily weekly monthly session summary blocks statusline trend'
+complete -c llmut -n '__fish_use_subcommand' -a 'completion serve claude codex opencode amp pi daily weekly monthly session summary blocks statusline trend'
 complete -c llmut -n '__fish_seen_subcommand_from completion' -a 'bash zsh fish'
 complete -c llmut -l json -s j -d 'emit JSON'
 complete -c llmut -l format -a 'table pretty json csv html' -d 'output format'
@@ -817,6 +838,7 @@ complete -c llmut -l no-unicode -d 'force ASCII sparklines'
 complete -c llmut -l live -d 'refresh output'
 complete -c llmut -l progress -d 'show progress'
 complete -c llmut -l no-progress -d 'disable progress'
+complete -c llmut -l view -a 'daily weekly monthly session summary blocks statusline trend' -d 'view'
 complete -c llmut -l since -r -d 'start date'
 complete -c llmut -l until -r -d 'end date'
 complete -c llmut -l compare -r -d 'comparison baseline'
@@ -844,6 +866,8 @@ complete -c llmut -l budget -r -d 'cost budget'
 complete -c llmut -l budget-period -a 'day week month' -d 'budget period'
 complete -c llmut -l token-budget -r -d 'token budget'
 complete -c llmut -l budget-exit -d 'exit when over budget'
+complete -c llmut -l host -r -d 'dashboard host'
+complete -c llmut -l port -r -d 'dashboard port'
 complete -c llmut -l config -r -d 'config file'
 complete -c llmut -l cache -d 'compatibility no-op'
 complete -c llmut -l offline -d 'compatibility no-op'

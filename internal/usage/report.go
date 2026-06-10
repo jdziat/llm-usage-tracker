@@ -30,6 +30,9 @@ type RenderOptions struct {
 
 	progress        bool
 	refreshInterval time.Duration
+	serve           bool
+	serveHost       string
+	servePort       int
 }
 
 func Render(w io.Writer, res core.Result, q core.Query, opts RenderOptions) error {
