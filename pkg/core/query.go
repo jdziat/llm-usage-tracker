@@ -12,6 +12,7 @@ type Query struct {
 	Since, Until  time.Time
 	Location      *time.Location
 	View          string
+	Compare       string
 	By            string
 	Project, ID   string
 	Order         string

@@ -39,6 +39,32 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		defer stop()
 		return runLive(q, opts, stdout, stderr, ctx.Done())
 	}
+	if q.Compare != "" {
+		current, baseline, err := baselineQuery(q)
+		if err != nil {
+			return err
+		}
+		diff, err := loadCompare(current, baseline, opts, stderr)
+		if err != nil {
+			return err
+		}
+		for _, w := range diff.Warnings {
+			if opts.Debug {
+				fmt.Fprintln(stderr, "warning:", warningString(w))
+			}
+		}
+		out, closeOut, err := outputWriter(stdout, opts.OutputPath)
+		if err != nil {
+			return err
+		}
+		if closeOut != nil {
+			defer closeOut()
+		}
+		if opts.Format == "csv" || opts.Format == "html" {
+			fmt.Fprintln(stderr, "warning: --compare is not supported for csv/html output; emitting current period only.")
+		}
+		return RenderDiff(out, diff, current, opts)
+	}
 	res, err := load(q, opts, stderr)
 	if err != nil {
 		return err
@@ -136,6 +162,7 @@ func parseArgs(args []string) (core.Query, RenderOptions, bool, error) {
 	fs.Bool("O", false, "no-op, accepted for ccusage compatibility (pricing is always offline)")
 	fs.StringVar(&since, "since", "", "start date")
 	fs.StringVar(&until, "until", "", "end date")
+	fs.StringVar(&q.Compare, "compare", "", "compare against previous or YYYY-MM-DD..YYYY-MM-DD")
 	fs.StringVar(&timezone, "timezone", "", "timezone")
 	fs.StringVar(&timezone, "z", "", "timezone")
 	fs.StringVar(&q.Order, "order", "desc", "asc or desc")
@@ -238,6 +265,15 @@ func parseArgs(args []string) (core.Query, RenderOptions, bool, error) {
 	}
 	if q.Until, err = parseDateBound(until, q.Location, true); err != nil {
 		return q, opts, live, err
+	}
+	if q.Compare != "" {
+		q.Compare = strings.TrimSpace(q.Compare)
+		if q.View == "blocks" || q.View == "statusline" {
+			return q, opts, live, fmt.Errorf("--compare is not supported for blocks or statusline views")
+		}
+		if _, _, err := baselineQuery(q); err != nil {
+			return q, opts, live, err
+		}
 	}
 	if q.Order != "asc" && q.Order != "desc" {
 		return q, opts, live, fmt.Errorf("--order must be asc or desc")
@@ -497,6 +533,113 @@ func parseDateBound(s string, loc *time.Location, end bool) (time.Time, error) {
 	return t, nil
 }
 
+func baselineQuery(q core.Query) (core.Query, core.Query, error) {
+	if q.Location == nil {
+		q.Location = time.Local
+	}
+	switch q.Compare {
+	case "previous":
+		return previousBaselineQuery(q)
+	default:
+		parts := strings.Split(q.Compare, "..")
+		if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+			return core.Query{}, core.Query{}, compareSpecError()
+		}
+		since, err := parseDateBound(parts[0], q.Location, false)
+		if err != nil {
+			return core.Query{}, core.Query{}, compareSpecError()
+		}
+		until, err := parseDateBound(parts[1], q.Location, true)
+		if err != nil {
+			return core.Query{}, core.Query{}, compareSpecError()
+		}
+		baseline := q
+		baseline.Since = since
+		baseline.Until = until
+		return q, baseline, nil
+	}
+}
+
+func previousBaselineQuery(q core.Query) (core.Query, core.Query, error) {
+	if !q.Since.IsZero() || !q.Until.IsZero() {
+		if q.Since.IsZero() || q.Until.IsZero() {
+			return core.Query{}, core.Query{}, fmt.Errorf("--compare previous requires both --since and --until, or neither")
+		}
+		days := calendarDaysInclusive(q.Since, q.Until, q.Location)
+		baseline := q
+		baseline.Until = q.Since.Add(-time.Nanosecond)
+		baseline.Since = q.Since.AddDate(0, 0, -days)
+		return q, baseline, nil
+	}
+
+	now := time.Now().In(q.Location)
+	var currentSince, currentUntil time.Time
+	// Default previous windows follow the selected view: monthly compares this
+	// calendar month with the previous calendar month, weekly compares this
+	// calendar week with the previous week honoring StartOfWeek, and daily plus
+	// other views compare today with yesterday. These defaults also set the
+	// current query window so both sides are bounded consistently.
+	switch q.View {
+	case "monthly":
+		currentSince = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, q.Location)
+		currentUntil = currentSince.AddDate(0, 1, 0).Add(-time.Nanosecond)
+	case "weekly":
+		currentSince = weekStart(now, q.Location, q.StartOfWeek)
+		currentUntil = currentSince.AddDate(0, 0, 7).Add(-time.Nanosecond)
+	default:
+		currentSince = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, q.Location)
+		currentUntil = currentSince.AddDate(0, 0, 1).Add(-time.Nanosecond)
+	}
+	q.Since = currentSince
+	q.Until = currentUntil
+	baseline := q
+	switch q.View {
+	case "monthly":
+		baseline.Since = currentSince.AddDate(0, -1, 0)
+		baseline.Until = currentSince.Add(-time.Nanosecond)
+	case "weekly":
+		baseline.Since = currentSince.AddDate(0, 0, -7)
+		baseline.Until = currentSince.Add(-time.Nanosecond)
+	default:
+		baseline.Since = currentSince.AddDate(0, 0, -1)
+		baseline.Until = currentSince.Add(-time.Nanosecond)
+	}
+	return q, baseline, nil
+}
+
+func calendarDaysInclusive(since, until time.Time, loc *time.Location) int {
+	if loc == nil {
+		loc = time.Local
+	}
+	start := since.In(loc)
+	end := until.In(loc)
+	day := time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, loc)
+	last := time.Date(end.Year(), end.Month(), end.Day(), 0, 0, 0, 0, loc)
+	days := 0
+	for !day.After(last) {
+		days++
+		day = day.AddDate(0, 0, 1)
+	}
+	return days
+}
+
+func weekStart(t time.Time, loc *time.Location, startOfWeek string) time.Time {
+	local := t.In(loc)
+	start := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, loc)
+	weekday := int(start.Weekday())
+	if startOfWeek == "sunday" {
+		return start.AddDate(0, 0, -weekday)
+	}
+	if weekday == 0 {
+		weekday = 7
+	}
+	return start.AddDate(0, 0, -(weekday - 1))
+}
+
+func compareSpecError() error {
+	return fmt.Errorf("--compare must be previous or a date range like 2026-05-01..2026-05-31")
+}
+
 func printHelp(w io.Writer) {
 	fmt.Fprintln(w, `llmut tracks local coding-agent LLM usage.
 
@@ -527,6 +670,7 @@ Options:
     key, input, output, cache_cr, cache_rd, reasoning, total, cost, credits, models,
     source, session_id, project, start, last
     JSON output always emits the full structured row.
+  --compare previous|YYYY-MM-DD..YYYY-MM-DD compares against a baseline period.
   --config <path> reads JSON defaults. If absent, llmut checks $LLMUT_CONFIG,
     then $XDG_CONFIG_HOME/llmut/config.json, then ~/.config/llmut/config.json.
 
@@ -570,7 +714,7 @@ _llmut() {
     --budget-period) COMPREPLY=( $(compgen -W "day week month" -- "$cur") ); return 0 ;;
   esac
   if [[ "$cur" == -* ]]; then
-    COMPREPLY=( $(compgen -W "--json -j --format --output -o --breakdown -b --instances -i --active -a --recent -r --compact --debug --live --progress --no-progress --cache --offline -O --since --until --timezone -z --order --start-of-week --mode --by --project -p --id --top --path --claude-path --codex-path --opencode-path --amp-path --pi-path --token-limit --session-length --refresh-interval --speed --fields --budget --budget-period --token-budget --budget-exit --config --locale --debug-samples --help -h" -- "$cur") )
+    COMPREPLY=( $(compgen -W "--json -j --format --output -o --breakdown -b --instances -i --active -a --recent -r --compact --debug --live --progress --no-progress --cache --offline -O --since --until --compare --timezone -z --order --start-of-week --mode --by --project -p --id --top --path --claude-path --codex-path --opencode-path --amp-path --pi-path --token-limit --session-length --refresh-interval --speed --fields --budget --budget-period --token-budget --budget-exit --config --locale --debug-samples --help -h" -- "$cur") )
     return 0
   fi
   COMPREPLY=( $(compgen -W "completion claude codex opencode amp pi daily weekly monthly session summary blocks statusline" -- "$cur") )
@@ -592,7 +736,7 @@ _llmut() {
     '--instances[group by project]' '-i[group by project]' '--active[only active block]' '-a[only active block]'
     '--recent[recent blocks]' '-r[recent blocks]' '--compact[compact output]' '--debug[debug]' '--live[live refresh]'
     '--progress[show progress]' '--no-progress[disable progress]' '--cache[compatibility no-op]' '--offline[compatibility no-op]' '-O[compatibility no-op]'
-    '--since[start date]:date:' '--until[end date]:date:' '--timezone[timezone]:timezone:' '-z[timezone]:timezone:'
+    '--since[start date]:date:' '--until[end date]:date:' '--compare[comparison baseline]:compare:' '--timezone[timezone]:timezone:' '-z[timezone]:timezone:'
     '--order[sort order]:order:(asc desc)' '--start-of-week[start of week]:(monday sunday)'
     '--mode[cost mode]:mode:(auto calculate display)' '--by[summary rollup]:by:(model project source)' '--project[project filter]:project:' '-p[project filter]:project:'
     '--id[session id filter]:id:' '--top[row limit]:count:' '--path[source path]:path:_files'
@@ -631,6 +775,7 @@ complete -c llmut -l progress -d 'show progress'
 complete -c llmut -l no-progress -d 'disable progress'
 complete -c llmut -l since -r -d 'start date'
 complete -c llmut -l until -r -d 'end date'
+complete -c llmut -l compare -r -d 'comparison baseline'
 complete -c llmut -l timezone -s z -r -d 'timezone'
 complete -c llmut -l order -a 'asc desc' -d 'sort order'
 complete -c llmut -l start-of-week -a 'monday sunday' -d 'start of week'
@@ -699,6 +844,22 @@ func title(q core.Query) string {
 	return fmt.Sprintf("Coding Agent Usage Report - %s - %s", view, scope)
 }
 
+func titleDiff(q core.Query) string {
+	scope := "All Sources"
+	if len(q.Sources) == 1 {
+		scope = core.SourceLabel(q.Sources[0])
+	}
+	view := q.View
+	if view != "" {
+		view = strings.ToUpper(view[:1]) + view[1:]
+	}
+	suffix := "(vs baseline)"
+	if q.Compare == "previous" {
+		suffix = "(vs previous)"
+	}
+	return fmt.Sprintf("Coding Agent Usage Report - %s %s - %s", view, suffix, scope)
+}
+
 func load(q core.Query, opts RenderOptions, stderr io.Writer) (core.Result, error) {
 	var indicator *progressIndicator
 	var onProgress core.Progress
@@ -715,6 +876,24 @@ func load(q core.Query, opts RenderOptions, stderr io.Writer) (core.Result, erro
 		}
 	}
 	return core.LoadAndAggregate(q, onProgress)
+}
+
+func loadCompare(q, baseline core.Query, opts RenderOptions, stderr io.Writer) (core.DiffResult, error) {
+	var indicator *progressIndicator
+	var onProgress core.Progress
+	if opts.progress && writerIsTerminal(stderr) {
+		indicator = newProgressIndicator(stderr)
+		indicator.Start()
+		defer indicator.Close()
+		onProgress = func(stage string) {
+			if strings.HasPrefix(stage, "Scanned ") || strings.HasPrefix(stage, "Calculated ") {
+				indicator.Done(stage)
+				return
+			}
+			indicator.Set(stage)
+		}
+	}
+	return core.LoadAndCompare(q, baseline, onProgress)
 }
 
 func warningString(w core.Warning) string {

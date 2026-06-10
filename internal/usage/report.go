@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"math"
 	"strings"
 	"time"
 
@@ -43,6 +44,19 @@ func Render(w io.Writer, res core.Result, q core.Query, opts RenderOptions) erro
 	return nil
 }
 
+func RenderDiff(w io.Writer, diff core.DiffResult, q core.Query, opts RenderOptions) error {
+	switch opts.Format {
+	case "json":
+		return writeDiffJSON(w, diff)
+	case "csv":
+		return writeCSV(w, opts, diffCurrentRows(diff))
+	case "html":
+		return writeHTML(w, titleDiff(q), q, opts, diffCurrentResult(diff))
+	}
+	renderDiffReport(w, diff, q, opts)
+	return nil
+}
+
 func writeJSON(w io.Writer, res core.Result) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
@@ -63,6 +77,18 @@ func renderReport(out io.Writer, res core.Result, q core.Query, opts RenderOptio
 		return
 	}
 	writeTable(out, title(q), res, q, opts)
+}
+
+func renderDiffReport(out io.Writer, diff core.DiffResult, q core.Query, opts RenderOptions) {
+	if len(diff.Rows) == 0 {
+		fmt.Fprintln(out, "No usage data found.")
+		return
+	}
+	if opts.Format == "pretty" {
+		writePrettyDiffTable(out, titleDiff(q), diff, q)
+		return
+	}
+	writeDiffTable(out, titleDiff(q), diff, q)
 }
 
 func writeTable(w io.Writer, title string, res core.Result, q core.Query, opts RenderOptions) {
@@ -120,6 +146,85 @@ func writePrettyTable(w io.Writer, title string, res core.Result, q core.Query, 
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, budgetBanner(*opts.BudgetStatus))
 	}
+}
+
+func writeDiffTable(w io.Writer, title string, diff core.DiffResult, q core.Query) {
+	fmt.Fprintln(w, title)
+	fmt.Fprintln(w, strings.Repeat("-", len(title)))
+	cols := diffColumns(q)
+	widths := diffWidths(q)
+	printColumnRow(w, widths, cols, diffHeaders(q))
+	printSep(w, widths)
+	for _, row := range diff.Rows {
+		printColumnRow(w, widths, cols, diffCells(row))
+	}
+	printSep(w, widths)
+	printColumnRow(w, widths, cols, diffTotalCells(diff.CurrentTotals, diff.BaselineTotals))
+}
+
+func writePrettyDiffTable(w io.Writer, title string, diff core.DiffResult, q core.Query) {
+	fmt.Fprintln(w, title)
+	cols := diffColumns(q)
+	widths := diffWidths(q)
+	printBoxBorder(w, widths, "top")
+	printBoxColumnRow(w, widths, cols, diffHeaders(q))
+	printBoxBorder(w, widths, "mid")
+	for _, row := range diff.Rows {
+		printBoxColumnRow(w, widths, cols, diffCells(row))
+	}
+	printBoxBorder(w, widths, "mid")
+	printBoxColumnRow(w, widths, cols, diffTotalCells(diff.CurrentTotals, diff.BaselineTotals))
+	printBoxBorder(w, widths, "bottom")
+}
+
+func writeDiffJSON(w io.Writer, diff core.DiffResult) error {
+	type currentRow struct {
+		Key string `json:"key"`
+		core.Tokens
+	}
+	type comparisonRow struct {
+		Key          string      `json:"key"`
+		Current      core.Tokens `json:"current"`
+		Baseline     core.Tokens `json:"baseline"`
+		DeltaCost    float64     `json:"deltaCost"`
+		PctCost      float64     `json:"pctCost"`
+		BaselineZero bool        `json:"baselineZero"`
+	}
+	type comparison struct {
+		BaselineTotals core.Tokens     `json:"baselineTotals"`
+		Rows           []comparisonRow `json:"rows"`
+	}
+	type diffJSON struct {
+		View       string         `json:"view"`
+		Data       []currentRow   `json:"data"`
+		Totals     core.Tokens    `json:"totals"`
+		Warnings   []core.Warning `json:"warnings,omitempty"`
+		Comparison comparison     `json:"comparison"`
+	}
+	out := diffJSON{
+		View:   diff.View,
+		Totals: diff.CurrentTotals,
+		Comparison: comparison{
+			BaselineTotals: diff.BaselineTotals,
+			Rows:           make([]comparisonRow, 0, len(diff.Rows)),
+		},
+	}
+	out.Warnings = diff.Warnings
+	out.Data = make([]currentRow, 0, len(diff.Rows))
+	for _, row := range diff.Rows {
+		out.Data = append(out.Data, currentRow{Key: row.Key, Tokens: row.Current})
+		out.Comparison.Rows = append(out.Comparison.Rows, comparisonRow{
+			Key:          row.Key,
+			Current:      row.Current,
+			Baseline:     row.Baseline,
+			DeltaCost:    row.DeltaCost(),
+			PctCost:      row.PctCost(),
+			BaselineZero: row.BaselineCostZero(),
+		})
+	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
 }
 
 func writeCSV(w io.Writer, opts RenderOptions, rows []core.Row) error {
@@ -292,6 +397,92 @@ func printBoxColumnRow(w io.Writer, widths []int, cols []fieldColumn, cells []st
 		}
 	}
 	fmt.Fprintln(w)
+}
+
+func diffColumns(q core.Query) []fieldColumn {
+	_ = q
+	return []fieldColumn{
+		{name: "key", left: true},
+		{name: "cost"},
+		{name: "prev"},
+		{name: "delta_cost"},
+		{name: "delta_pct"},
+	}
+}
+
+func diffWidths(q core.Query) []int {
+	return []int{minWidth(q, RenderOptions{}), 11, 11, 11, 8}
+}
+
+func diffHeaders(q core.Query) []string {
+	return []string{keyHeader(q), "Cost", "Prev", "Δ Cost", "Δ %"}
+}
+
+func diffCells(row core.DiffRow) []string {
+	return []string{
+		row.Key,
+		formatCost(row.Current.CostUSD),
+		formatCost(row.Baseline.CostUSD),
+		formatSignedCost(row.DeltaCost()),
+		formatPct(row),
+	}
+}
+
+func diffTotalCells(current, baseline core.Tokens) []string {
+	row := core.DiffRow{Key: "Total", Current: current, Baseline: baseline}
+	return []string{
+		"Total",
+		formatCost(current.CostUSD),
+		formatCost(baseline.CostUSD),
+		formatSignedCost(row.DeltaCost()),
+		formatPct(row),
+	}
+}
+
+func formatSignedCost(v float64) string {
+	if v == 0 {
+		return formatCost(0)
+	}
+	sign := "+"
+	if v < 0 {
+		sign = "-"
+	}
+	return sign + formatCost(math.Abs(v))
+}
+
+func formatPct(row core.DiffRow) string {
+	if row.BaselineCostZero() && row.Current.CostUSD > 0 {
+		return "new"
+	}
+	pct := row.PctCost()
+	if pct == 0 {
+		return "0.0%"
+	}
+	sign := "+"
+	if pct < 0 {
+		sign = "-"
+	}
+	return fmt.Sprintf("%s%.1f%%", sign, math.Abs(pct))
+}
+
+func diffCurrentRows(diff core.DiffResult) []core.Row {
+	rows := make([]core.Row, 0, len(diff.Rows))
+	for _, row := range diff.Rows {
+		if row.Current == (core.Tokens{}) {
+			continue
+		}
+		rows = append(rows, core.Row{Key: row.Key, Tokens: row.Current})
+	}
+	return rows
+}
+
+func diffCurrentResult(diff core.DiffResult) core.Result {
+	return core.Result{
+		View:     diff.View,
+		Rows:     diffCurrentRows(diff),
+		Totals:   diff.CurrentTotals,
+		Warnings: diff.Warnings,
+	}
 }
 
 func csvRow(row core.Row) []string {

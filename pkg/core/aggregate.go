@@ -51,7 +51,7 @@ func aggregateSummary(events []Event, cfg Query, keyFn func(Event) string) []Row
 	}
 	out := sortedSummaryRows(rows, cfg.Order)
 	limit := cfg.Top
-	if limit == 0 {
+	if limit == 0 && cfg.Compare == "" {
 		limit = 10
 	}
 	if limit > 0 && len(out) > limit {
