@@ -8,7 +8,7 @@ This document makes seven decisions and defends each against cost, risk, and mai
 
 ## Decision 1 — Wails v3 (not v2)
 
-> **Implementation status (P2/P3):** shipped on **Wails v2**, not v3. The build/CI environment could not compile v3 (it requires WebKitGTK 6.0 / GTK4, which was not installable there), so the project took the documented v2 fallback below. The Wails surface is confined to `desktop/main.go` and one `runtime.EventsEmit` call; `desktop/app.go` is pure `pkg/core`, so the v3 move remains the ~1-day mechanical change described here. The runtime API references below (`application.New`, `application.Get().EmitEvent`) are the v3 target, not what ships today.
+> **Implementation status (P3+):** **implemented on Wails v3 (alpha.98).** An earlier interim build shipped on v2 because v3 appeared uncompilable here — but the real blocker was never a missing library: WebKitGTK 6.0 / GTK4 were installed all along, and a conda `pkg-config` shim on `PATH` was shadowing the system one and hiding them. The fix is environmental (`PKG_CONFIG=/usr/bin/pkg-config`, or disable conda base auto-activation), so the v3 migration went ahead as the ~1-day mechanical change described here. The Wails surface is confined to `desktop/main.go` plus one `app.Event.Emit` call in `desktop/app.go`; `app.go` is otherwise pure `pkg/core`. The runtime API references below are the v3 surface that now ships.
 
 **Pick: Wails v3 (alpha).**
 

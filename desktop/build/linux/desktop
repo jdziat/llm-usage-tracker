@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Name=llmut
+Comment=Desktop shell for llmut usage analytics
+# The Exec line includes %u to pass the URL to the application
+Exec=/usr/local/bin/llmut %u
+Terminal=false
+Type=Application
+Icon=llmut
+Categories=Utility;
+StartupWMClass=llmut
+
+ 

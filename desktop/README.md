@@ -1,23 +1,39 @@
 # llmut Desktop
 
-This is a Wails v2 desktop shell for the core `llmut` engine. It is a separate Go module so Wails dependencies stay isolated from the stdlib-only root module.
+This is a Wails v3 desktop shell for the core `llmut` engine. It is a separate Go module so Wails dependencies stay isolated from the stdlib-only root module.
 
 ## Run Locally
 
 ```sh
 cd desktop
-wails dev
+task dev
 ```
 
-Live updates are delivered through the Wails runtime event bus. They only run
-inside `wails dev` or a built desktop app; the browser-only mock frontend
-intentionally skips the subscription because `window.runtime` is absent.
+If `task` is not installed, the bundled Wails task runner works too:
+
+```sh
+cd desktop
+wails3 task dev
+```
+
+Live updates are delivered through the Wails v3 runtime event bus. They only run inside `wails3 dev` or a built desktop app; the browser-only mock frontend intentionally skips the subscription because the Wails environment is absent.
 
 ## Build Locally
 
 ```sh
 cd desktop
-wails build
+task build
+```
+
+Equivalent manual commands:
+
+```sh
+cd desktop/frontend
+npm install
+npm run build
+
+cd ..
+wails3 build
 ```
 
 For plain Go checks, build the frontend first because `main.go` embeds `frontend/dist`:
@@ -28,33 +44,21 @@ npm install
 npm run build
 
 cd ..
-go build ./...
+PKG_CONFIG=/usr/bin/pkg-config go build ./...
+PKG_CONFIG=/usr/bin/pkg-config go test ./...
 ```
+
+`PKG_CONFIG=/usr/bin/pkg-config` is only needed when a conda environment shadows `pkg-config`; conda's shim may not search the system GTK4/WebKitGTK 6 directories.
 
 The desktop module resolves the root package through the committed `replace github.com/jdziat/llm-usage-tracker => ../` directive in `desktop/go.mod`. Do not create a `go.work`; it would defeat the dependency isolation.
 
 ## Releases & code signing
 
-Tagging a `v*` release builds desktop bundles for Linux, macOS, and Windows via
-`.github/workflows/desktop-release.yml` (separate from the CLI's release track;
-assets are named `llmut-desktop-<os>-<arch>` so they never collide with the CLI
-archives).
+Tagging a `v*` release builds desktop binaries for Linux, macOS, and Windows via `.github/workflows/desktop-release.yml` (separate from the CLI's release track; assets are named `llmut-desktop-<os>-<arch>` so they never collide with the CLI archives).
 
-**The macOS and Windows bundles ship unsigned for now.** Code signing is the one
-deferred item that depends on external procurement, not engineering:
+**The macOS and Windows builds ship unsigned for now.** Code signing is deferred until certificates are available:
 
-- **macOS** needs an Apple Developer ID certificate plus notarization
-  (`codesign` → `notarytool` → `xcrun stapler`), driven from CI secrets
-  (`APPLE_DEVELOPER_ID`, an app-specific password or App Store Connect API key).
-- **Windows** needs an Authenticode (OV/EV) certificate and its CI secret.
+- **macOS** needs an Apple Developer ID certificate plus notarization.
+- **Windows** needs an Authenticode certificate and its CI secret.
 
-Until those certs exist, first-run on macOS/Windows hits Gatekeeper/SmartScreen:
-
-- **macOS:** right-click the app → **Open** (or `xattr -d com.apple.quarantine /path/to/llmut.app`).
-- **Windows:** **More info → Run anyway** on the SmartScreen prompt.
-- **Linux:** the AppImage/`.deb`/binary need no signing and are the recommended
-  first-class download until the macOS/Windows certs land.
-
-When the certificates are available, add the signing/notarization steps to
-`desktop-release.yml` (after `wails build`) and flip the bundles to signed — no
-application code changes are required.
+Until those certs exist, first-run on macOS/Windows may hit Gatekeeper/SmartScreen. Linux needs no signing.

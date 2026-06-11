@@ -1,0 +1,44 @@
+version: '3'
+
+includes:
+  common: ./build/Taskfile.yml
+  windows: ./build/windows/Taskfile.yml
+  darwin: ./build/darwin/Taskfile.yml
+  linux: ./build/linux/Taskfile.yml
+
+vars:
+  APP_NAME: llmut
+  BIN_DIR: bin
+  PACKAGE_MANAGER: npm
+  VITE_PORT: '{{.WAILS_VITE_PORT | default 9245}}'
+
+tasks:
+  frontend:build:
+    summary: Installs dependencies and builds the frontend.
+    dir: frontend
+    cmds:
+      - npm install
+      - npm run build
+
+  dev:
+    summary: Runs the Wails v3 app in development mode.
+    deps:
+      - frontend:build
+    cmds:
+      - wails3 dev -config ./build/config.yml -port {{.VITE_PORT}}
+    env:
+      PKG_CONFIG: /usr/bin/pkg-config
+
+  build:
+    summary: Builds the Wails v3 app.
+    deps:
+      - frontend:build
+    cmds:
+      - wails3 build
+    env:
+      PKG_CONFIG: /usr/bin/pkg-config
+
+  run:
+    summary: Runs the built app binary.
+    cmds:
+      - ./{{.BIN_DIR}}/{{.APP_NAME}}{{exeExt}}

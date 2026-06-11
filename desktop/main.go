@@ -2,30 +2,38 @@ package main
 
 import (
 	"embed"
+	"log"
 
-	"github.com/wailsapp/wails/v2"
-	"github.com/wailsapp/wails/v2/pkg/options"
-	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
 //go:embed all:frontend/dist
 var embeddedFS embed.FS
 
 func main() {
-	svc := &UsageService{}
+	app := application.New(application.Options{
+		Name: "llmut",
+		Services: []application.Service{
+			application.NewService(&UsageService{}),
+		},
+		Assets: application.AssetOptions{
+			Handler: application.BundledAssetFileServer(embeddedFS),
+		},
+	})
 
-	err := wails.Run(&options.App{
+	app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:  "llmut",
 		Width:  1100,
 		Height: 720,
-		AssetServer: &assetserver.Options{
-			Assets: embeddedFS,
-		},
-		OnStartup:  svc.OnStartup,
-		OnShutdown: svc.OnShutdown,
-		Bind:       []interface{}{svc},
+		URL:    "/",
 	})
-	if err != nil {
-		println("error:", err.Error())
+
+	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+		startUsageWatch(app)
+	})
+
+	if err := app.Run(); err != nil {
+		log.Fatal(err)
 	}
 }

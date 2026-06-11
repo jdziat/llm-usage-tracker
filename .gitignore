@@ -19,6 +19,8 @@
 /desktop/frontend/node_modules/
 /desktop/frontend/dist/
 /desktop/frontend/wailsjs/
+/desktop/frontend/bindings/
+/desktop/frontend/package.json.md5
 
 # Tool caches and agent-dispatch artifacts
 /.pytest_cache/

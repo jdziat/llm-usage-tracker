@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=llmut
+Exec=llmut
+Icon=llmut
+Categories=Development;
+Terminal=false
+Keywords=wails
+Version=1.0
+StartupNotify=false

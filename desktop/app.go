@@ -1,14 +1,12 @@
 package main
 
 import (
-	"context"
 	"io/fs"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/jdziat/llm-usage-tracker/pkg/core"
-	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 // watchInterval is how often the live watcher polls source directory mtimes. Kept
@@ -16,22 +14,8 @@ import (
 const watchInterval = 3 * time.Second
 
 // UsageService is the Wails-bound bridge to the core data engine. Methods are
-// exposed to the frontend as window.go.main.UsageService.*.
-//
-// The mutable live-watch state lives behind a pointer (*watchState) rather than
-// inline, so the value-receiver data methods (GetUsage, CompareUsage,
-// ListSources) can copy the struct without tripping vet's copylocks check.
-type UsageService struct {
-	watch *watchState
-}
-
-// watchState holds the live-watch goroutine's runtime context and cancel func,
-// guarded by a mutex. It is heap-allocated and shared by pointer.
-type watchState struct {
-	mu     sync.Mutex
-	ctx    context.Context
-	cancel context.CancelFunc
-}
+// exposed to the frontend through Wails v3 bound service calls.
+type UsageService struct{}
 
 // GetUsage loads and aggregates usage for a query sent from the frontend.
 //
@@ -65,65 +49,28 @@ func (UsageService) ListSources() []string {
 	return core.AllSources()
 }
 
-// OnStartup is the Wails lifecycle hook wired into options.App. It captures the
-// runtime context (needed to emit events to the frontend) and starts the
-// live-watch goroutine.
-func (s *UsageService) OnStartup(ctx context.Context) {
-	if s.watch == nil {
-		s.watch = &watchState{}
-	}
-	w := s.watch
-	w.mu.Lock()
-	if w.cancel != nil {
-		w.mu.Unlock()
-		return
-	}
-	watchCtx, cancel := context.WithCancel(ctx)
-	w.ctx = ctx
-	w.cancel = cancel
-	w.mu.Unlock()
-	w.start(watchCtx)
-}
-
-// OnShutdown is the Wails lifecycle hook wired into options.App. It stops the
-// live-watch goroutine cleanly.
-func (s *UsageService) OnShutdown(context.Context) {
-	if s.watch == nil {
-		return
-	}
-	w := s.watch
-	w.mu.Lock()
-	cancel := w.cancel
-	w.cancel = nil
-	w.mu.Unlock()
-	if cancel != nil {
-		cancel()
-	}
-}
-
-// start polls the resolved source directories on an interval and emits a
+// startUsageWatch polls the resolved source directories on an interval and emits a
 // "usage:changed" event to the frontend whenever any source's newest mtime
 // advances, so the UI can refetch. It returns immediately; the poll loop runs
-// in a background goroutine until ctx is cancelled (OnShutdown).
-func (w *watchState) start(ctx context.Context) {
+// in a background goroutine until the Wails application context is cancelled.
+func startUsageWatch(app *application.App) {
 	go func() {
 		ticker := time.NewTicker(watchInterval)
 		defer ticker.Stop()
-		prev := snapshotMtimes(resolvedSourceRoots())
+		// The candidate root set is fixed for the run (it derives from the home
+		// dir + built-in source layout), so resolve it once; only the mtimes
+		// beneath those roots change tick to tick.
+		roots := resolvedSourceRoots()
+		prev := snapshotMtimes(roots)
 		for {
 			select {
-			case <-ctx.Done():
+			case <-app.Context().Done():
 				return
 			case <-ticker.C:
-				cur := snapshotMtimes(resolvedSourceRoots())
+				cur := snapshotMtimes(roots)
 				if mtimesChanged(prev, cur) {
 					prev = cur
-					w.mu.Lock()
-					emitCtx := w.ctx
-					w.mu.Unlock()
-					if emitCtx != nil {
-						wruntime.EventsEmit(emitCtx, "usage:changed")
-					}
+					app.Event.Emit("usage:changed", nil)
 				}
 			}
 		}

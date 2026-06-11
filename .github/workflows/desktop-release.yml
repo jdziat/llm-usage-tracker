@@ -1,9 +1,9 @@
 name: Desktop Release
 
-# Builds the Wails v2 desktop app (desktop/) for each OS on tag pushes and
-# attaches the produced bundles to the GitHub release.
+# Builds the Wails v3 desktop app (desktop/) for each OS on tag pushes and
+# attaches the produced binaries to the GitHub release.
 #
-# NOTE: the macOS (.app) and Windows (.exe) bundles ship UNSIGNED for now.
+# NOTE: the macOS and Windows binaries ship UNSIGNED for now.
 # Code signing / notarization (Apple) and Authenticode (Windows) is P4 work —
 # until then users will see Gatekeeper / SmartScreen warnings on first launch.
 #
@@ -51,46 +51,55 @@ jobs:
           cache: npm
           cache-dependency-path: desktop/frontend/package-lock.json
 
-      # Wails v2 Linux build needs WebKit2GTK 4.1 + GTK3 headers.
+      # Wails v3 Linux build needs WebKitGTK 6 + GTK4 headers.
       - name: Install Linux WebKit/GTK dependencies
         if: runner.os == 'Linux'
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev
+          sudo apt-get install -y libwebkitgtk-6.0-dev libgtk-4-dev
 
-      # Install the Wails v2 CLI (NOT v3 — v3 cannot be built in this project).
-      - name: Install Wails v2 CLI
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+      - uses: arduino/setup-task@v2
 
-      # `wails build` runs the frontend install/build (per wails.json) and then
-      # compiles + bundles the Go app into desktop/build/bin/.
-      - name: Wails build
+      - name: Install Wails v3 CLI
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha.98
+
+      - name: Build frontend
+        working-directory: desktop/frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Wails v3 build
         working-directory: desktop
-        run: wails build -clean -platform ${{ matrix.platform }}/${{ matrix.arch }}
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            export PKG_CONFIG=/usr/bin/pkg-config
+          fi
+          wails3 build GOOS=${{ matrix.platform }} GOARCH=${{ matrix.arch }}
 
-      # Package the platform bundle under a predictable, OS/arch-tagged name.
+      # Package the platform binary under a predictable, OS/arch-tagged name.
       - name: Package bundle
         working-directory: desktop
         run: |
           set -euo pipefail
           asset="llmut-desktop-${{ matrix.platform }}-${{ matrix.arch }}"
-          ls -la build/bin
+          ls -la bin
           case "${{ matrix.platform }}" in
             darwin)
-              # Wails emits a .app bundle (a directory) on macOS; zip it.
-              app=$(ls -d build/bin/*.app | head -n1)
-              zip -r -y "${asset}.zip" "$app"
+              bin="bin/llmut"
+              chmod +x "$bin"
+              zip -j "${asset}.zip" "$bin"
               ;;
             windows)
-              exe=$(ls build/bin/*.exe | head -n1)
+              exe=$(ls bin/*.exe | head -n1)
               # Use 7z (present on GitHub Windows runners) for a portable zip.
               7z a "${asset}.zip" "$exe"
               ;;
             linux)
-              bin="build/bin/llmut"
+              bin="bin/llmut"
               chmod +x "$bin"
-              tar -czf "${asset}.tar.gz" -C build/bin llmut
+              tar -czf "${asset}.tar.gz" -C bin llmut
               ;;
           esac
 

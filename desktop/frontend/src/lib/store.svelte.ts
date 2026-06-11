@@ -4,7 +4,7 @@
 // store, shared by reference, so every screen reacts to the same filter — the
 // "one dataset, many lenses" model from the design doc.
 
-import { getUsage, isLive, listSources, onUsageChanged, type Query, type Result } from '../api';
+import { getUsage, isLive, listSources, onUsageChanged, waitForRuntime, type Query, type Result } from '../api';
 import { mockPreviousTrend, mockTrend } from '../mock';
 import type { Trend } from '../api';
 import { SOURCE_ORDER, type SourceId } from './palette';
@@ -70,11 +70,9 @@ class AppStore {
   scanMs = $state(0);
   live = $state(false);
   private usageChangedSubscribed = false;
-  private devState = !isLive() ? new URLSearchParams(window.location.search).get('state') : null;
-
-  constructor() {
-    this.live = isLive();
-  }
+  // Resolved in init() *after* the runtime is detected — reading it at
+  // construction would race the v3 environment injection (see init()).
+  private devState: string | null = null;
 
   get sourcesArray(): string[] {
     return [...this.selectedSources];
@@ -239,7 +237,13 @@ class AppStore {
   async init(): Promise<void> {
     document.documentElement.setAttribute('data-theme', this.theme);
     document.documentElement.setAttribute('data-density', this.density);
-    if (isLive() && !this.usageChangedSubscribed) {
+    // The v3 runtime injects window._wails.environment from a post-page-load
+    // hook, which lands after this onMount fires — wait for it so live mode is
+    // detected instead of falling back to mock data and never subscribing to
+    // updates. In a plain browser this times out and we stay in mock mode.
+    this.live = await waitForRuntime();
+    this.devState = !this.live ? new URLSearchParams(window.location.search).get('state') : null;
+    if (this.live && !this.usageChangedSubscribed) {
       onUsageChanged(() => void this.reload());
       this.usageChangedSubscribed = true;
     }
