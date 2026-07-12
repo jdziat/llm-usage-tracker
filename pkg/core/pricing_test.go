@@ -46,6 +46,28 @@ func TestFable5AndMythos5Pricing(t *testing.T) {
 	}
 }
 
+func TestGPT56FamilyPricing(t *testing.T) {
+	tok := Tokens{Input: 1_000_000, Output: 1_000_000, CacheCreation: 1_000_000, CacheRead: 1_000_000}
+	cases := []struct {
+		model string
+		want  float64
+	}{
+		// Sol: $5 input + $30 output + $5 cache write (defaults to input) + $0.50 cache read.
+		{"gpt-5.6-sol", 40.5},
+		{"gpt-5.6", 40.5},                // bare alias routes to Sol.
+		{"gpt-5.6-sol-2026-07-09", 40.5}, // dated variant normalizes to Sol.
+		// Terra: $2.50 input + $15 output + $2.50 cache write + $0.25 cache read.
+		{"gpt-5.6-terra", 20.25},
+		// Luna: $1 input + $6 output + $1 cache write + $0.10 cache read.
+		{"gpt-5.6-luna", 8.1},
+	}
+	for _, c := range cases {
+		if got := calculateCost(c.model, tok, "standard"); got != c.want {
+			t.Errorf("%s cost = %.2f, want %.2f", c.model, got, c.want)
+		}
+	}
+}
+
 func TestFastModeIsPerModel(t *testing.T) {
 	tok := Tokens{Input: 1_000_000, Output: 1_000_000, CacheCreation: 1_000_000, CacheRead: 1_000_000}
 	cases := []struct {

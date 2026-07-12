@@ -26,6 +26,9 @@ var builtinPrices = map[string]price{
 	"claude-3-7-sonnet":    {input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3},
 	"claude-3-5-sonnet":    {input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3},
 	"claude-3-5-haiku":     {input: 0.8, output: 4, cacheWrite: 1, cacheRead: 0.08},
+	"gpt-5.6-sol":          {input: 5, output: 30, cacheRead: 0.5},
+	"gpt-5.6-terra":        {input: 2.5, output: 15, cacheRead: 0.25},
+	"gpt-5.6-luna":         {input: 1, output: 6, cacheRead: 0.1},
 	"gpt-5.5":              {input: 1.25, output: 10, cacheRead: 0.125},
 	"gpt-5.4":              {input: 1.25, output: 10, cacheRead: 0.125},
 	"gpt-5.3-codex":        {input: 1.25, output: 10, cacheRead: 0.125},
@@ -103,6 +106,13 @@ func normalizeModel(model string) string {
 	switch {
 	case strings.Contains(m, "gemini-3-pro"):
 		return "gemini-3-pro-preview"
+	case strings.Contains(m, "gpt-5.6-terra"):
+		return "gpt-5.6-terra"
+	case strings.Contains(m, "gpt-5.6-luna"):
+		return "gpt-5.6-luna"
+	case strings.Contains(m, "gpt-5.6"):
+		// The bare gpt-5.6 alias routes to the Sol flagship tier.
+		return "gpt-5.6-sol"
 	case strings.Contains(m, "fable-5"):
 		return "claude-fable-5"
 	case strings.Contains(m, "mythos-5"):
