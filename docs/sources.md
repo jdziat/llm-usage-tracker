@@ -73,7 +73,7 @@ Details:
 - **Cached input is subtracted.** Codex reports `input_tokens` inclusive of cached tokens. llmut records `cached_input_tokens` as cache reads and subtracts them from input (clamped at zero) so the two are not double-billed.
 - **Reasoning tokens.** `reasoning_output_tokens` are tracked separately as reasoning tokens.
 - **Model fallback.** If no `session_meta`/`turn_context` named a model, the event falls back to `gpt-5`. The event is flagged internally (`IsFallback`), though no current report format surfaces the flag.
-- **Cost.** Codex logs carry no cost, so it is always computed from the pricing table. `--speed` selects the pricing tier, but fast-tier multipliers currently exist only for Claude fast-mode models (see [docs/pricing.md](pricing.md)), so Codex costs are identical under `fast` and `standard`. `--speed auto` (the default) detects `service_tier = "priority"` or `"fast"` in the `config.toml` next to the default sessions directory.
+- **Cost.** Codex logs carry no cost, so it is always computed from the pricing table. `--speed` selects the pricing tier; fast-tier multipliers exist for the Claude Opus fast-mode models and for the OpenAI models with published fast rates, including `gpt-6-astra`, the GPT-5.6 family, and `gpt-5.3-codex` (see [docs/pricing.md](pricing.md)). `--speed auto` (the default) detects `service_tier = "priority"` or `"fast"` in the `config.toml` next to the default sessions directory.
 
 ## OpenCode, Amp, pi-agent (`opencode`, `amp`, `pi`) — the generic reader
 
