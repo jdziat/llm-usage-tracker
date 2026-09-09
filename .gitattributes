@@ -1,0 +1,5 @@
+# Golden files are compared byte for byte against renderer output, and every
+# renderer emits LF. A checkout that rewrites their line endings (git's
+# core.autocrlf defaults to true on Windows) makes TestGolden* fail with a diff
+# that looks identical on screen. Never convert them.
+internal/usage/testdata/** -text

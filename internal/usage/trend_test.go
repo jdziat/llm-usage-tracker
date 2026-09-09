@@ -22,6 +22,10 @@ func writeTrendEvents(t *testing.T) string {
 }
 
 func TestTrendViewRendersSparklineAndStats(t *testing.T) {
+	// Sparkline glyphs are chosen by localeSupportsUnicode, which reads the
+	// locale environment. Pin it: a runner with no LANG/LC_* set (Windows CI)
+	// otherwise renders the ASCII fallback and fails on the glyph assertion.
+	t.Setenv("LC_ALL", "en_US.UTF-8")
 	root := writeTrendEvents(t)
 	var out, errOut bytes.Buffer
 	err := Run([]string{"opencode", "trend", "--path", root, "--since", "2026-06-01", "--until", "2026-06-03", "--timezone", "UTC", "--mode", "display", "--no-progress"}, &out, &errOut)
