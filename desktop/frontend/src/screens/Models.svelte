@@ -9,7 +9,7 @@
   import TokenDonut from '../components/TokenDonut.svelte';
   import Skeleton from '../components/Skeleton.svelte';
   import { fmtCost, fmtTokens, totalTokens } from '../lib/format';
-  import { sourceColor, sourceGlyph, sourceForModel, isPriced, FAST_MULTIPLIER } from '../lib/palette';
+  import { sourceColor, sourceGlyph, sourceForModel, isPriced, isApproxPriced, resolvePrice, MODEL_PRICES, FAST_MULTIPLIER } from '../lib/palette';
 
   let rows = $state<Row[]>([]);
   let selectedKey = $state<string | null>(null);
@@ -37,19 +37,17 @@
   const maxCost = $derived(Math.max(1, ...rows.map((r) => r.costUSD)));
   const selectedTokens = $derived(selected ? totalTokens(selected) : 0);
 
-  // illustrative offline price table (mirror of pkg/core/pricing.go in/out).
-  const PRICES: Record<string, [number, number]> = {
-    'claude-opus-4-8': [5, 25],
-    'claude-sonnet-4-6': [3, 15],
-    'claude-haiku-4-5': [1, 5],
-    'gpt-5.5': [1.25, 10],
-    'gpt-5.3-codex': [1.25, 10],
-    'gemini-2.5-pro': [1.25, 10],
-    'claude-fable-5': [10, 50],
-  };
-
-  const fastMult = $derived(selected ? (FAST_MULTIPLIER[selected.key] ?? 0) : 0);
-  const price = $derived(selected ? PRICES[selected.key] : undefined);
+  // Resolved through the shared table in lib/palette, so a dated or suffixed
+  // ID (and a model priced from its family default) shows the same rate the
+  // Go core charged it, instead of reading as unpriced.
+  const resolved = $derived(selected ? resolvePrice(selected.key) : { key: undefined, match: 'none' as const });
+  // Not at the family rung: the Go fastMultiplier has no family fallback, so
+  // a family-resolved model was never charged a fast premium and must not be
+  // shown one.
+  const fastMult = $derived(
+    resolved.key && resolved.match !== 'family' ? (FAST_MULTIPLIER[resolved.key] ?? 0) : 0,
+  );
+  const price = $derived(resolved.key ? MODEL_PRICES[resolved.key] : undefined);
 </script>
 
 <div class="models">
@@ -68,7 +66,8 @@
                 <span class="name" class:unpriced={!isPriced(r.key)}>{r.key}</span>
                 <span class="cost mono" class:unpriced={!isPriced(r.key) && r.costUSD === 0}>
                   {fmtCost(r.costUSD)}
-                  {#if !isPriced(r.key) && r.costUSD === 0}<span class="info" title="Unknown model — tokens counted, cost unpriced">ⓘ</span>{/if}
+                  {#if !isPriced(r.key) && r.costUSD === 0}<span class="info" title="Unknown model — tokens counted, cost unpriced">ⓘ</span>
+                  {:else if isApproxPriced(r.key)}<span class="info" title="Model not in the price table — cost estimated from its family's current flagship rate">≈</span>{/if}
                 </span>
               </div>
               <CompositionBar tokens={r} height={6} />
@@ -123,9 +122,9 @@
         <div class="callout">
           <span class="co-tag">FAST TIER</span>
           <p>
-            This model carries a <b class="mono">{fastMult}×</b> fast multiplier. On the standard tier the same tokens
-            would cost <b class="mono">{fmtCost(selected.costUSD / fastMult)}</b> — you're paying
-            <b class="mono">{fmtCost(selected.costUSD - selected.costUSD / fastMult)}</b> extra for speed.
+            This model has a <b class="mono">{fastMult}×</b> fast tier: fast-mode tokens bill at
+            <b class="mono">{fastMult}×</b> the standard rate. Logs do not record which tier a request
+            ran on, so the cost above may or may not already include that premium.
           </p>
         </div>
       {/if}
@@ -134,7 +133,11 @@
         {#if price}
           <span class="prov-price">${price[0].toFixed(2)} / ${price[1].toFixed(2)} per 1M in/out</span>
           <span class="prov-sep">·</span>
-          <span class="prov-src">offline price table, verified 2026-06-09</span>
+          {#if resolved.match === 'family'}
+            <span class="prov-src">≈ estimated from {resolved.key}, the current flagship of this family</span>
+          {:else}
+            <span class="prov-src">offline price table{resolved.match === 'variant' ? ` (as ${resolved.key})` : ''}, verified 2026-09-08</span>
+          {/if}
         {:else}
           <span class="prov-unknown">⚠ Unknown model — tokens counted, cost unpriced ($0). Not in the offline table.</span>
         {/if}
